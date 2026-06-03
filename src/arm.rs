@@ -101,6 +101,8 @@ struct Targets {
     kd: Vec<f32>,
     tau: Vec<f32>,
     vlim: Vec<f32>,
+    force_pos: Vec<bool>,
+    force_pos_torque_ratio: Vec<f32>,
 }
 
 impl Targets {
@@ -113,6 +115,8 @@ impl Targets {
             kd: vec![0.0; n],
             tau: vec![0.0; n],
             vlim: vec![0.0; n],
+            force_pos: vec![false; n],
+            force_pos_torque_ratio: vec![0.0; n],
         }
     }
 }
@@ -252,6 +256,13 @@ impl Inner {
                 }
             },
             None => false,
+        }
+    }
+
+    fn ensure_mode_one_timeout(&self, name: &str, mode: u32, timeout_ms: u32) -> Result<(), String> {
+        match self.motor(name) {
+            Some(m) => m.ensure_mode(mode, timeout_ms),
+            None => Err(format!("Unknown joint: {name}")),
         }
     }
 
@@ -735,6 +746,20 @@ impl RobotArm {
         Ok(ok)
     }
 
+    #[pyo3(signature = (name, mode, timeout_ms=1000))]
+    fn ensure_mode(&self, name: String, mode: u32, timeout_ms: u32) -> PyResult<bool> {
+        if self.inner.loop_active() {
+            return Err(PyRuntimeError::new_err(
+                "控制循环运行中不可切换模式，请先 stop_control_loop()",
+            ));
+        }
+
+        self.inner
+            .ensure_mode_one_timeout(&name, mode, timeout_ms)
+            .map(|()| true)
+            .map_err(PyRuntimeError::new_err)
+    }
+
     // ---------------- 控制命令 ----------------
 
     #[pyo3(signature = (pos, vel=None, kp=None, kd=None, tau=None, request_feedback=true))]
@@ -852,7 +877,16 @@ impl RobotArm {
     // ---------------- RT-native 目标设置 ----------------
 
     /// 设置 RT 控制循环的目标（按当前 mode 解释）。供 start_rt_loop 使用。
-    #[pyo3(signature = (pos, kp=None, kd=None, vel=None, tau=None, vlim=None))]
+    #[pyo3(signature = (
+        pos,
+        kp=None,
+        kd=None,
+        vel=None,
+        tau=None,
+        vlim=None,
+        force_pos=None,
+        force_pos_torque_ratio=None
+    ))]
     fn set_targets(
         &self,
         pos: Vec<f64>,
@@ -861,6 +895,8 @@ impl RobotArm {
         vel: Option<Vec<f64>>,
         tau: Option<Vec<f64>>,
         vlim: Option<Vec<f64>>,
+        force_pos: Option<Vec<bool>>,
+        force_pos_torque_ratio: Option<Vec<f64>>,
     ) -> PyResult<()> {
         let n = self.inner.num_joints();
         if pos.len() != n {
@@ -875,6 +911,16 @@ impl RobotArm {
         check_len("vel", &vel, n)?;
         check_len("tau", &tau, n)?;
         check_len("vlim", &vlim, n)?;
+        if let Some(v) = &force_pos {
+            if v.len() != n {
+                return Err(PyValueError::new_err(format!(
+                    "force_pos 长度 {} 必须等于关节数 {}",
+                    v.len(),
+                    n
+                )));
+            }
+        }
+        check_len("force_pos_torque_ratio", &force_pos_torque_ratio, n)?;
         let f32v = |v: Vec<f64>| v.into_iter().map(|x| x as f32).collect::<Vec<f32>>();
         let mode = match self.inner.mode.lock().unwrap().as_str() {
             "pos_vel" => 2u8,
@@ -889,6 +935,8 @@ impl RobotArm {
             kd: f32v(kd.unwrap_or_else(|| self.inner.mit_kd.lock().unwrap().clone())),
             tau: f32v(tau.unwrap_or_else(|| vec![0.0; n])),
             vlim: f32v(vlim.unwrap_or_else(|| self.inner.pv_vlim.lock().unwrap().clone())),
+            force_pos: force_pos.unwrap_or_else(|| vec![false; n]),
+            force_pos_torque_ratio: f32v(force_pos_torque_ratio.unwrap_or_else(|| vec![0.0; n])),
         };
         self.inner.targets.store(Arc::new(t));
         self.inner.targets_set.store(true, Ordering::Release);
@@ -984,6 +1032,8 @@ impl RobotArm {
                         kd: f32v(inner.mit_kd.lock().unwrap().clone()),
                         tau: vec![0.0; n],
                         vlim: f32v(inner.pv_vlim.lock().unwrap().clone()),
+                        force_pos: vec![false; n],
+                        force_pos_torque_ratio: vec![0.0; n],
                     };
                     // VEL 模式下 hold=零速度，已是 vel 全 0，安全。
                     inner.targets.store(Arc::new(hold));
@@ -1021,7 +1071,12 @@ impl RobotArm {
                 for (i, m) in control_motors.iter().enumerate() {
                     match t.mode {
                         2 => {
-                            let _ = m.send_pos_vel(t.pos[i], t.vlim[i]);
+                            if t.force_pos.get(i).copied().unwrap_or(false) {
+                                let ratio = t.force_pos_torque_ratio.get(i).copied().unwrap_or(0.0);
+                                let _ = m.send_force_pos(t.pos[i], t.vlim[i], ratio);
+                            } else {
+                                let _ = m.send_pos_vel(t.pos[i], t.vlim[i]);
+                            }
                         }
                         3 => {
                             let _ = m.send_vel(t.vel[i]);

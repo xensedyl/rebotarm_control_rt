@@ -272,6 +272,18 @@ impl UniMotor {
         }
     }
 
+    pub fn send_force_pos(&self, pos: f32, vlim: f32, torque_limit_ratio: f32) -> Result<(), String> {
+        match self {
+            UniMotor::Damiao(m) => m
+                .send_cmd_force_pos(pos, vlim, torque_limit_ratio)
+                .map_err(|e| e.to_string()),
+            UniMotor::Hightorque(m) => m
+                .send_cmd_force_pos(pos, vlim, torque_limit_ratio)
+                .map_err(|e| e.to_string()),
+            _ => Err("send_force_pos 仅 Damiao / HighTorque 支持".to_string()),
+        }
+    }
+
     pub fn send_vel(&self, vel: f32) -> Result<(), String> {
         match self {
             UniMotor::Damiao(m) => m.send_cmd_vel(vel).map_err(|e| e.to_string()),

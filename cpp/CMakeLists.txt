@@ -51,6 +51,15 @@ find_library(PINOCCHIO_PARSERS_LIB NAMES pinocchio_parsers
   HINTS "${PINOCCHIO_PREFIX}/lib" "${PINOCCHIO_PREFIX}/lib/x86_64-linux-gnu")
 get_filename_component(PINO_LIBDIR "${PINOCCHIO_DEFAULT_LIB}" DIRECTORY)
 message(STATUS "Pinocchio lib dir: ${PINO_LIBDIR}")
+find_library(URDFDOM_MODEL_LIB NAMES urdfdom_model
+  HINTS "${PINOCCHIO_PREFIX}/lib" "${PINOCCHIO_PREFIX}/lib/x86_64-linux-gnu"
+        /usr/local/lib /usr/lib/x86_64-linux-gnu)
+find_library(CONSOLE_BRIDGE_LIB NAMES console_bridge
+  HINTS "${PINOCCHIO_PREFIX}/lib" "${PINOCCHIO_PREFIX}/lib/x86_64-linux-gnu"
+        /usr/local/lib /usr/lib/x86_64-linux-gnu)
+find_library(TINYXML2_LIB NAMES tinyxml2
+  HINTS "${PINOCCHIO_PREFIX}/lib" "${PINOCCHIO_PREFIX}/lib/x86_64-linux-gnu"
+        /usr/local/lib /usr/lib/x86_64-linux-gnu)
 
 pybind11_add_module(_math
   src/bindings.cpp
@@ -67,6 +76,15 @@ target_compile_definitions(_math PRIVATE PINOCCHIO_WITH_URDFDOM)
 target_link_libraries(_math PRIVATE ${PINOCCHIO_DEFAULT_LIB})
 if(PINOCCHIO_PARSERS_LIB)
   target_link_libraries(_math PRIVATE ${PINOCCHIO_PARSERS_LIB})
+endif()
+if(URDFDOM_MODEL_LIB)
+  target_link_libraries(_math PRIVATE ${URDFDOM_MODEL_LIB})
+endif()
+if(CONSOLE_BRIDGE_LIB)
+  target_link_libraries(_math PRIVATE ${CONSOLE_BRIDGE_LIB})
+endif()
+if(TINYXML2_LIB)
+  target_link_libraries(_math PRIVATE ${TINYXML2_LIB})
 endif()
 if(Eigen3_FOUND)
   target_link_libraries(_math PRIVATE Eigen3::Eigen)

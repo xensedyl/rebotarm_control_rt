@@ -16,9 +16,16 @@ echo "== pybind11 cmakedir: $PYBIND11_DIR =="
 
 # Pinocchio C++ 前缀由 CMake 自动探测（conda-forge / 系统）；如需可显式：
 #   PINOCCHIO_PREFIX=/path/to/prefix ./build.sh
+PY_PREFIX="$("$PY" - <<'PYEOF'
+import sys
+print(sys.prefix)
+PYEOF
+)"
 CMAKE_PINO_ARG=()
 if [[ -n "${PINOCCHIO_PREFIX:-}" ]]; then
   CMAKE_PINO_ARG=(-DPINOCCHIO_PREFIX="$PINOCCHIO_PREFIX")
+elif [[ -d "$PY_PREFIX/include/pinocchio" ]]; then
+  CMAKE_PINO_ARG=(-DPINOCCHIO_PREFIX="$PY_PREFIX")
 fi
 
 # 清理上一次的 CMake 缓存：换 conda 环境后，find_library/find_package 的缓存会指向旧
@@ -42,6 +49,14 @@ if [[ "${1:-}" == "--wheel" ]]; then
   rm -f "$HERE"/dist/*.whl
   ( cd "$HERE" && "$PY" -m maturin build -i "$PY" -o dist )
   "$PY" -m pip install --force-reinstall --no-deps "$HERE"/dist/*.whl
+  # maturin packages the Rust extension; copy the C++ _math module next to it.
+  PKG_DST="$("$PY" - <<'PYEOF'
+import sysconfig
+print(sysconfig.get_paths()["purelib"] + "/rebotarm_control_rt")
+PYEOF
+)"
+  mkdir -p "$PKG_DST"
+  cp "$HERE"/python/rebotarm_control_rt/_math*.so "$PKG_DST/"
   # 同时把 _native.so 释放进源码树，使 PYTHONPATH=$HERE/python 可直接运行（免装 wheel）。
   "$PY" - "$HERE" <<'PYEOF'
 import glob, os, sys, zipfile
