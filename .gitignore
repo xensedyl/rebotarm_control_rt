@@ -1,0 +1,11 @@
+/target/
+/dist/
+/cpp/build/
+
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+
+/python/rebotarm_control_rt/_native*.so
+/python/rebotarm_control_rt/_math*.so
