@@ -295,6 +295,13 @@ pos = 当前关节位置
 python example/9_gravity_compensation.py --rate 200
 ```
 
+默认 `use_gripper=true`：动力学模型会把 URDF 中固定在末端的 `end_link` 负载计入重力补偿，
+并使用实测效果较好的 `0.7` 负载缩放。若机械臂未安装夹爪或末端负载，显式关闭：
+
+```bash
+python example/9_gravity_compensation.py --rate 200 --use_gripper=false
+```
+
 按 `Ctrl+C` 停止并断开。
 
 ---
@@ -317,6 +324,7 @@ python example/10_gravity_compensation_lock.py --rate 200
 | `--w-threshold` | TCP 角速度阈值 |
 | `--kp`, `--kd` | MIT 锁止刚度和阻尼 |
 | `--integral-limit` | 积分力矩限幅 |
+| `--use_gripper=true/false` | 是否计入固定 `end_link` 夹爪负载；默认 `true`，并使用标定后的 `0.7` 负载缩放 |
 
 ---
 

@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import signal
 import sys
+import tempfile
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -27,16 +29,88 @@ from rebotarm_control_rt.dynamics import (
     get_default_gravity,
     load_dynamics_model,
 )
-from rebotarm_control_rt.kinematics import load_robot_model
+from rebotarm_control_rt.kinematics import _URDF, load_robot_model
 
 
 _running = True
+END_LINK_LOAD_SCALE_WITH_GRIPPER = 0.7
 
 
 def _sigint_handler(signum, frame) -> None:
     global _running
     print("\n[gravity_lock] stopping...")
     _running = False
+
+
+def _str_to_bool(value: str | bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    value = value.strip().lower()
+    if value in {"1", "true", "t", "yes", "y", "on"}:
+        return True
+    if value in {"0", "false", "f", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("expected true or false")
+
+
+def _end_link_load_urdf(scale: float) -> str:
+    if scale < 0.0:
+        raise ValueError("--end-link-load-scale must be >= 0")
+
+    tree = ET.parse(_URDF)
+    root = tree.getroot()
+    end_link = root.find("./link[@name='end_link']")
+    inertial = end_link.find("inertial") if end_link is not None else None
+    if end_link is None or inertial is None:
+        raise RuntimeError("URDF does not contain end_link inertial to scale")
+
+    if scale == 0.0:
+        end_link.remove(inertial)
+    else:
+        mass = inertial.find("mass")
+        inertia = inertial.find("inertia")
+        if mass is None or inertia is None:
+            raise RuntimeError("URDF end_link inertial is missing mass or inertia")
+        mass.set("value", str(float(mass.attrib["value"]) * scale))
+        for key in ("ixx", "ixy", "ixz", "iyy", "iyz", "izz"):
+            inertia.set(key, str(float(inertia.attrib[key]) * scale))
+
+    tmp = tempfile.NamedTemporaryFile("wb", suffix=".urdf", delete=False)
+    with tmp:
+        tree.write(tmp, encoding="utf-8", xml_declaration=True)
+    return tmp.name
+
+
+def _load_gravity_model(use_gripper: bool):
+    scale = END_LINK_LOAD_SCALE_WITH_GRIPPER if use_gripper else 0.0
+    if scale == 1.0:
+        return load_dynamics_model()
+    tmp_urdf = _end_link_load_urdf(scale)
+    try:
+        return load_dynamics_model(tmp_urdf)
+    finally:
+        Path(tmp_urdf).unlink(missing_ok=True)
+
+
+def _lock_command_vectors(arm, model_nq: int, q_target: np.ndarray, tau_g: np.ndarray, integral: np.ndarray, args):
+    n = arm.num_joints
+    pos = q_target.copy()
+    vel = np.zeros(n, dtype=float)
+    kp = np.full(n, args.kp, dtype=float)
+    kd = np.full(n, args.kd, dtype=float)
+    tau = np.zeros(n, dtype=float)
+    tau[:model_nq] = tau_g
+    tau += integral
+
+    if n > model_nq:
+        if args.use_gripper:
+            kp[model_nq:] = args.gripper_kp
+            kd[model_nq:] = args.gripper_kd
+        else:
+            kp[model_nq:] = 0.0
+            kd[model_nq:] = 0.0
+            tau[model_nq:] = 0.0
+    return pos, vel, kp, kd, tau
 
 
 def main() -> None:
@@ -48,12 +122,24 @@ def main() -> None:
     parser.add_argument("--kp", type=float, default=8.0, help="MIT lock stiffness.")
     parser.add_argument("--kd", type=float, default=1.0, help="MIT lock damping.")
     parser.add_argument("--integral-limit", type=float, default=0.5, help="Integral torque clamp.")
+    parser.add_argument(
+        "--use_gripper",
+        "--use-gripper",
+        dest="use_gripper",
+        type=_str_to_bool,
+        default=True,
+        metavar="{true,false}",
+        help="Whether to include the fixed end_link gripper load in the gravity model.",
+    )
+    parser.add_argument("--gripper-kp", type=float, default=0.0, help="MIT stiffness for extra gripper joints.")
+    parser.add_argument("--gripper-kd", type=float, default=1.0, help="MIT damping for extra gripper joints.")
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
     kin_model = load_robot_model()
-    dyn_model = load_dynamics_model()
+    dyn_model = _load_gravity_model(args.use_gripper)
+    end_link_scale = END_LINK_LOAD_SCALE_WITH_GRIPPER if args.use_gripper else 0.0
     frame_id = kin_model.end_effector_frame_id()
 
     print("=" * 65)
@@ -61,6 +147,7 @@ def main() -> None:
     print("=" * 65)
     print(f"[model] nq={dyn_model.nq}, nv={dyn_model.nv}")
     print(f"[gravity] {get_default_gravity()} m/s^2")
+    print(f"[gripper/end_link load] scale={end_link_scale:.3f}")
     print(f"[thresholds] v={args.vel_threshold} m/s, w={args.w_threshold} rad/s")
     print("Ctrl+C to stop and disconnect.")
     print("-" * 65)
@@ -82,23 +169,38 @@ def main() -> None:
         integral = np.zeros_like(q_target)
         print(f"[target] initial lock: {np.degrees(q_target).round(2)} deg")
 
-        kp = np.full(arm.num_joints, args.kp, dtype=float).tolist()
-        kd = np.full(arm.num_joints, args.kd, dtype=float).tolist()
-        arm.mode_mit(kp=kp, kd=kd)
+        if arm.num_joints < dyn_model.nq:
+            raise ValueError(f"arm config has {arm.num_joints} joints, dynamics model requires {dyn_model.nq}")
+        if args.use_gripper and arm.num_joints > dyn_model.nq:
+            names = list(arm.joint_names)[dyn_model.nq:]
+            print(f"[gripper] using extra arm joint(s) for gripper compensation: {names}")
+
+        kp = np.full(arm.num_joints, args.kp, dtype=float)
+        kd = np.full(arm.num_joints, args.kd, dtype=float)
+        if arm.num_joints > dyn_model.nq:
+            if args.use_gripper:
+                kp[dyn_model.nq:] = args.gripper_kp
+                kd[dyn_model.nq:] = args.gripper_kd
+            else:
+                kp[dyn_model.nq:] = 0.0
+                kd[dyn_model.nq:] = 0.0
+        arm.mode_mit(kp=kp.tolist(), kd=kd.tolist())
         print(f"[MIT mode] kp={args.kp}, kd={args.kd}")
 
         while _running:
             t0 = time.perf_counter()
             q = np.asarray(arm.get_positions(request=True), dtype=float)
             qd = np.asarray(arm.get_velocities(), dtype=float)
-            tau_g = np.asarray(compute_generalized_gravity(dyn_model, q), dtype=float)
+            q_model = q[: dyn_model.nq]
+            qd_model = qd[: kin_model.nv]
+            tau_g = np.asarray(compute_generalized_gravity(dyn_model, q_model), dtype=float)
 
             q_error = q_target - q
             integral += q_error * dt
             np.clip(integral, -args.integral_limit, args.integral_limit, out=integral)
 
-            jacobian = np.asarray(kin_model.frame_jacobian(q, frame_id), dtype=float)
-            v_spatial = jacobian @ qd
+            jacobian = np.asarray(kin_model.frame_jacobian(q_model, frame_id), dtype=float)
+            v_spatial = jacobian @ qd_model
             v_norm = float(np.linalg.norm(v_spatial[:3]))
             w_norm = float(np.linalg.norm(v_spatial[3:]))
 
@@ -109,12 +211,14 @@ def main() -> None:
             else:
                 lock_counter += 1
 
+            pos, vel, kp_cmd, kd_cmd, tau = _lock_command_vectors(arm, dyn_model.nq, q_target, tau_g, integral, args)
+
             arm.mit(
-                pos=q_target.tolist(),
-                vel=np.zeros(arm.num_joints).tolist(),
-                kp=kp,
-                kd=kd,
-                tau=(tau_g + integral).tolist(),
+                pos=pos.tolist(),
+                vel=vel.tolist(),
+                kp=kp_cmd.tolist(),
+                kd=kd_cmd.tolist(),
+                tau=tau.tolist(),
                 request_feedback=False,
             )
 

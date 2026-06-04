@@ -304,6 +304,14 @@ kp = 0, kd = 1 in the loop command
 python example/9_gravity_compensation.py --rate 200
 ```
 
+By default, `use_gripper=true`: the fixed `end_link` load in the URDF is included in the
+gravity model with a calibrated scale of `0.7`, which matches the tested B601 gripper setup.
+If the arm is running without the gripper/end load, disable it explicitly:
+
+```bash
+python example/9_gravity_compensation.py --rate 200 --use_gripper=false
+```
+
 Press `Ctrl+C` to stop and disconnect.
 
 ---
@@ -327,6 +335,7 @@ Important options:
 | `--w-threshold` | Angular TCP velocity threshold |
 | `--kp`, `--kd` | MIT lock stiffness and damping |
 | `--integral-limit` | Integral torque clamp |
+| `--use_gripper=true/false` | Include or exclude the fixed `end_link` gripper load; default is `true` with a calibrated `0.7` load scale |
 
 ---
 
