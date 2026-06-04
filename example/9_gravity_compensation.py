@@ -1,135 +1,113 @@
 #!/usr/bin/env python3
-"""重力补偿控制演示。
+"""Gravity-compensation demo.
 
-使用 Pinocchio 计算当前关节构型下的广义重力向量 g(q)，
-通过 MIT 模式的前馈力矩直接补偿重力，使机械臂可以在任意姿态下
-"漂浮"，即松开后不会因自重坠落。
+This example keeps Python callback control because each cycle computes a
+dynamics feed-forward torque from the current joint state.
 
-控制律（MIT 位置闭环 + 重力前馈）：
-    tau = g(q)          — 重力前馈
-    pos = 当前电机位置   — 关节位置目标跟随当前位置
-    kp   = 0,  kd = 1.0   — 所有电机统一刚度/阻尼
+Use on hardware only:
+    python example/9_gravity_compensation.py [--config arm.yaml] [--rate 200]
 
-终端持续打印每个关节的期望力矩（N·m）。
+Ctrl+C stops the control loop and disconnects.
 """
+from __future__ import annotations
+
+import argparse
 import signal
 import sys
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+SOURCE_PYTHON = Path(__file__).resolve().parents[1] / "python"
+if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
+    sys.path.insert(0, str(SOURCE_PYTHON))
 
 from rebotarm_control_rt.actuator import RobotArm
 from rebotarm_control_rt.dynamics import (
-    load_dynamics_model,
     compute_generalized_gravity,
     get_default_gravity,
+    load_dynamics_model,
 )
 
-
-# --------------------------------------------------------------------------- #
-# 全局控制标志
-# --------------------------------------------------------------------------- #
 
 _running = True
 
 
-def _sigint_handler(signum, frame):
+def _sigint_handler(signum, frame) -> None:
     global _running
-    print("\n[gravity_comp] 收到 Ctrl+C，准备停止...")
+    print("\n[gravity_comp] stopping...")
     _running = False
 
 
-signal.signal(signal.SIGINT, _sigint_handler)
+def make_gravity_compensation_controller(model) -> Callable:
+    counter = {"n": 0}
 
-
-# --------------------------------------------------------------------------- #
-# 控制回调（每周期调用一次，由 RobotArm 控制循环驱动）
-# --------------------------------------------------------------------------- #
-
-def gravity_compensation_controller(arm: RobotArm, dt: float) -> None:
-    """重力补偿控制回调。
-
-    读取当前关节位置 → Pinocchio 计算 g(q) → MIT 前馈力矩。
-    """
-    # 1. 读取当前关节位置
-    q = arm.get_positions()          # shape=(6,), 单位: rad
-
-    # 2. Pinocchio 计算广义重力向量
-    tau_g = compute_generalized_gravity(q=q)   # shape=(6,), 单位: N·m
-
-    # 3. MIT 前馈: 位置目标跟随当前电机位置，kp=0, kd=1，重力补偿
-    arm.mit(
-        pos=q,
-        vel=np.zeros(arm.num_joints),
-        kp=np.full(arm.num_joints, 0.0),
-        kd=np.full(arm.num_joints, 1.0),
-        tau=tau_g,
-        request_feedback=True,
-    )
-
-    # 4. 终端打印（每隔 ~20 个周期打印一次，避免刷屏）
-    gravity_compensation_controller._counter += 1
-    if gravity_compensation_controller._counter % 20 == 0:
-        print(
-            f"[{gravity_compensation_controller._counter:4d}] "
-            f"tau_g = " + "  ".join(f"{t:+.3f}" for t in tau_g) + "  N·m"
+    def controller(arm, dt: float) -> None:
+        q = arm.get_positions()
+        tau_g = compute_generalized_gravity(model, q)
+        arm.mit(
+            pos=q.tolist(),
+            vel=np.zeros(arm.num_joints).tolist(),
+            kp=np.zeros(arm.num_joints).tolist(),
+            kd=np.ones(arm.num_joints).tolist(),
+            tau=np.asarray(tau_g, dtype=float).tolist(),
+            request_feedback=True,
         )
 
+        counter["n"] += 1
+        if counter["n"] % 20 == 0:
+            tau_text = "  ".join(f"{float(t):+.3f}" for t in tau_g)
+            print(f"[{counter['n']:4d}] tau_g = {tau_text}  N*m")
 
-gravity_compensation_controller._counter = 0
+    return controller
 
-
-# --------------------------------------------------------------------------- #
-# 主程序
-# --------------------------------------------------------------------------- #
 
 def main() -> None:
-    print("=" * 60)
-    print("  reBotArm 重力补偿演示")
-    print("  预计行为: 机械臂维持位置不动，可以手动掰动至任何位置）")
-    print("  Ctrl+C 停止并断开连接")
-    print("=" * 60)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--rate", type=float, default=None, help="Python callback loop rate in Hz.")
+    parser.add_argument("--kp", type=float, default=2.0, help="MIT mode stiffness written before loop start.")
+    parser.add_argument("--kd", type=float, default=1.0, help="MIT mode damping written before loop start.")
+    args = parser.parse_args()
 
-    # 动力学模型初始化
+    signal.signal(signal.SIGINT, _sigint_handler)
+
     model = load_dynamics_model()
-    g_vec = get_default_gravity()
-    print(f"\n[模型] nq={model.nq}, nv={model.nv}")
-    print(f"[重力] {g_vec}  m/s²")
-
-    # 机器人连接
-    arm = RobotArm()
-    arm.connect()
-    print("\n[连接] OK")
-
-    # 使能电机
-    arm.enable()
-    print("[使能] OK")
-    # arm.disable()  # 先失能测试
-
-    # 切换到 MIT 模式（kp=0, kd=1，位置目标跟随当前电机位置）
-    arm.mode_mit(
-        kp=np.full(arm.num_joints, 2.0),
-        kd=np.full(arm.num_joints, 1.0),
-    )
-    print("[MIT模式] OK（kp=2, kd=1）")
-
-    # 启动控制循环，频率使用配置默认值 (500 Hz)
-    arm.start_control_loop(gravity_compensation_controller, rate=arm._rate)
-    print(f"[控制循环] 启动 @ {arm._rate} Hz")
-    print("-" * 60)
-    print(f"{'step':>4}  tau_g (N·m)")
+    print("=" * 60)
+    print("  reBotArm RT gravity-compensation demo")
+    print("=" * 60)
+    print(f"[model] nq={model.nq}, nv={model.nv}")
+    print(f"[gravity] {get_default_gravity()} m/s^2")
+    print("Expected behavior: arm holds against gravity while remaining compliant.")
+    print("Ctrl+C to stop and disconnect.")
     print("-" * 60)
 
+    arm = RobotArm(args.config)
+    rate = args.rate
     try:
+        arm.connect()
+        print("[connect] OK")
+        arm.enable()
+        print("[enable] OK")
+
+        kp = np.full(arm.num_joints, args.kp, dtype=float).tolist()
+        kd = np.full(arm.num_joints, args.kd, dtype=float).tolist()
+        arm.mode_mit(kp=kp, kd=kd)
+        print(f"[MIT mode] kp={args.kp}, kd={args.kd}")
+
+        if rate is None:
+            rate = getattr(arm, "_rate", 200.0)
+        arm.start_control_loop(make_gravity_compensation_controller(model), rate=rate)
+        print(f"[control loop] started @ {rate} Hz")
+
         while _running:
-            time.sleep(0.01)   # 主线程只负责保活，打印在回调中完成
+            time.sleep(0.01)
     finally:
-        print("\n[停止] 关闭控制循环...")
+        print("\n[stop] disconnecting...")
         arm.disconnect()
-        print("[完成] 已安全断开连接")
+        print("[done] disconnected")
 
 
 if __name__ == "__main__":

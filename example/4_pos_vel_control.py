@@ -1,76 +1,91 @@
 #!/usr/bin/env python3
-"""reBotArm POS_VEL 位置速度控制
+"""Interactive RT-native POS_VEL position control.
 
-用法:
-    python example/4_pos_vel_control.py
-
-输入: n 个关节角度（度），空格分隔
-示例:
-    0 0 0 0 0 0
-    10 -20 30 -40 50 60
-    10 -20 30 -40 50 60 5.0   # 末尾可附加 vlim 覆盖 yaml
-
-POS_VEL 模式: PI 位置环 + PI 速度环
+Python only updates targets. The control loop runs on a Rust thread.
+Input n joint angles in degrees. Optional trailing value overrides vlim.
 """
-from pathlib import Path
+from __future__ import annotations
+
+import argparse
 import sys
+from pathlib import Path
+
 import numpy as np
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+
+SOURCE_PYTHON = Path(__file__).resolve().parents[1] / "python"
+if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
+    sys.path.insert(0, str(SOURCE_PYTHON))
+
 from rebotarm_control_rt.actuator import RobotArm
 
-arm = RobotArm()
-target_pos: np.ndarray
-pv_vlim: np.ndarray
+
+def print_state(arm) -> None:
+    pos, vel, torque = arm.get_state(request=True)
+    names = list(arm.joint_names)
+    print("  pos(deg):", {name: round(float(deg), 2) for name, deg in zip(names, np.degrees(pos))})
+    print("  vel(deg/s):", {name: round(float(deg), 2) for name, deg in zip(names, np.degrees(vel))})
+    print("  torque:", {name: round(float(tau), 3) for name, tau in zip(names, torque)})
 
 
-def pos_vel_controller(ref: RobotArm, dt: float) -> None:
-    ref.pos_vel(target_pos, vlim=pv_vlim)
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--rate", type=float, default=None, help="RT loop rate in Hz. Defaults to YAML rate.")
+    parser.add_argument("--rt-priority", type=int, default=0, help="Best-effort SCHED_FIFO priority.")
+    parser.add_argument("--cpu", type=int, default=None, help="Optional CPU affinity.")
+    parser.add_argument("--request-feedback", action="store_true", help="Request feedback from RT loop.")
+    args = parser.parse_args()
 
-
-arm.connect()
-print("--- 连接成功 ---")
-arm.enable()
-print("--- 使能成功 ---")
-arm.mode_pos_vel()
-print("--- POS_VEL 模式 ---\n")
-
-n = arm.num_joints
-target_pos = np.zeros(n)
-pv_vlim = np.array([j.vlim for j in arm._joints], dtype=np.float64)
-
-arm.start_control_loop(pos_vel_controller)
-print(f"关节数: {n} | vlim: {pv_vlim[0]:.2f} rad/s | {arm._rate}Hz")
-print("输入 n 个角度(度) q退出 state查看状态\n")
-
-while True:
+    arm = RobotArm(args.config)
     try:
-        line = input("> ").strip()
-    except EOFError:
-        break
+        arm.connect()
+        print("--- connected ---")
+        arm.enable()
+        print("--- enabled ---")
+        arm.mode_pos_vel()
+        print("--- POS_VEL mode ---")
 
-    if not line:
-        continue
-    if line.lower() in ("q", "quit", "exit"):
-        break
+        n = arm.num_joints
+        names = list(arm.joint_names)
+        vlim = np.array([j.vlim for j in arm._joints], dtype=np.float64)
 
-    if line.lower() == "state":
-        pos = arm.get_positions()
-        vel = arm.get_velocities()
-        print(f"  pos: {[f'{x:+.2f}' for x in np.degrees(pos)]}")
-        print(f"  vel: {[f'{x:+.2f}' for x in np.degrees(vel)]}")
-        continue
+        # Do not set a target before start_rt_loop: native loop will hold current pose.
+        arm.start_rt_loop(
+            rate=args.rate,
+            rt_priority=args.rt_priority,
+            cpu=args.cpu,
+            request_feedback=args.request_feedback,
+        )
+        print(f"joints: {names}")
+        print("RT loop started. First target is current pose hold.")
+        print("Input: q1 ... qN [vlim], 'state', or 'q'. Angles are degrees.")
 
-    tokens = line.split()
-    if len(tokens) < n:
-        print(f"需要 {n} 个值")
-        continue
+        while True:
+            line = input("> ").strip()
+            if not line:
+                continue
+            if line.lower() in {"q", "quit", "exit"}:
+                break
+            if line.lower() == "state":
+                print_state(arm)
+                print(f"  overruns send/read: {arm.rt_send_overruns}/{arm.rt_read_overruns}")
+                continue
 
-    pos_deg = [float(x) for x in tokens[:n]]
-    target_pos[:] = np.radians(pos_deg)
+            values = line.split()
+            if len(values) < n:
+                print(f"need {n} joint values")
+                continue
+            target_deg = np.array([float(v) for v in values[:n]], dtype=np.float64)
+            if len(values) >= n + 1:
+                vlim[:] = float(values[n])
 
-    if len(tokens) > n:
-        pv_vlim[:] = float(tokens[n])
+            arm.set_targets(pos=np.radians(target_deg).tolist(), vlim=vlim.tolist())
+            print(f"  target(deg): {[round(float(x), 2) for x in target_deg]}  vlim={vlim[0]:.3f} rad/s")
+    except (KeyboardInterrupt, EOFError):
+        pass
+    finally:
+        arm.disconnect()
 
-    print(f"  -> {[f'{x:+.1f}' for x in pos_deg]}  vlim={pv_vlim[0]:.2f}")
 
-arm.disconnect()
+if __name__ == "__main__":
+    main()

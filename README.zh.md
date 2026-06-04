@@ -64,8 +64,8 @@ bash ./setup_env.sh --install
   `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `/usr/local` > `/usr`。
   自动适配 `lib` 与 `lib/x86_64-linux-gnu`，自动定位 Eigen。**不依赖 ROS。**
 - 运行期 RPATH 已写入 Pinocchio 库目录，无需 `LD_LIBRARY_PATH`。
-- `build.sh --wheel` 还会把 `_native.so` 释放进 `python/` 源码树，于是也可**免安装**直接跑：
-  `PYTHONPATH=python python example/9_gravity_compensation.py`。
+- 从仓库根目录运行 example 时，脚本会自动把本地 `python/` 源码树加入 `sys.path`，
+  因此安装 wheel 之前也可以先测试示例。
 
 > ⚠️ 用 conda-forge 的 **Pinocchio 3.x**（`pinocchio>=3.2,<4`）。4.0 重排了头文件布局，
 > 当前代码按 3.x 编写。
@@ -76,6 +76,277 @@ RT 循环是 **Rust 软实时**（`std::thread` + 绝对节拍 + overrun 计数 
 它全程释放 Python GIL，比 Python 线程稳定得多——但**不是** Flexiv RDK 那种硬实时栈。
 要接近硬实时：在 PREEMPT_RT 内核上以 root 运行并设 `rt_priority`/`cpu`，
 并监控 `arm.rt_send_overruns` / `arm.rt_read_overruns`。
+
+## 示例程序
+
+激活 Python 环境后，在仓库根目录运行：
+
+```bash
+cd rebotarm_control_rt
+conda activate rebot
+```
+
+所有真机示例都支持 `--config/-c` 指定其他 arm/gripper YAML。从仓库根目录运行时，示例会自动
+把本地 `python/` 源码树加入 `sys.path`。
+
+### 调试工具
+
+#### 1. 单电机控制台（`0x01damiao_test.py`、`1_damiao_text.py`）
+
+交互式单关节终端。它通过 `RobotArm` 控制一个指定关节，同时让其他关节保持当前位置。
+`1_damiao_text.py` 保留为与 `reBotArm_control_py` 同名的兼容入口。
+
+**运行**：
+
+```bash
+python example/0x01damiao_test.py --joint 0
+python example/1_damiao_text.py --joint joint1
+```
+
+**交互命令**：
+
+| 命令 | 说明 |
+|---|---|
+| `mit <pos_deg> [vel kp kd tau]` | 给选中关节发送 MIT 目标 |
+| `posvel <pos_deg> [vlim]` | 给选中关节发送 POS_VEL 目标 |
+| `vel <vel_rad_s>` | 给选中关节发送速度指令 |
+| `mode <mit|posvel|vel>` | 切换控制模式 |
+| `enable` / `disable` | 使能或失能机械臂 |
+| `set_zero` | 设置选中关节零点 |
+| `state` | 打印选中关节的位置、速度、力矩 |
+
+---
+
+#### 2. 零点校准与状态监控（`2_zero_and_read.py`）
+
+打印实时关节位置。若不加 `--skip-zero`，脚本会先要求确认，然后把当前姿态设为零点。
+
+**运行**：
+
+```bash
+python example/2_zero_and_read.py --skip-zero
+python example/2_zero_and_read.py
+```
+
+---
+
+### 关节控制示例
+
+#### 3. RT 原生 MIT 控制（`3_mit_control.py`）
+
+以 MIT 模式启动 Rust RT 循环。Python 只通过 `set_targets` 更新目标缓存，Rust 线程按设定频率下发电机帧。
+
+**运行**：
+
+```bash
+python example/3_mit_control.py --rate 150
+```
+
+**输入格式**：
+
+```text
+q1 q2 q3 q4 q5 q6 [kp kd]     # 关节角度单位为度
+state                         # 打印当前状态和 RT overrun
+q                             # 退出
+```
+
+---
+
+#### 4. RT 原生 POS_VEL 控制（`4_pos_vel_control.py`）
+
+以 POS_VEL 模式启动 Rust RT 循环。输入末尾可附加 `vlim`，用于覆盖本次命令的所有关节速度上限。
+
+**运行**：
+
+```bash
+python example/4_pos_vel_control.py --rate 150
+```
+
+**输入格式**：
+
+```text
+q1 q2 q3 q4 q5 q6 [vlim]      # 关节角度单位为度，vlim 单位为 rad/s
+state                         # 打印当前状态和 RT overrun
+q                             # 退出
+```
+
+---
+
+### 运动学测试
+
+#### 5. 正运动学测试（`5_fk_test.py`）
+
+根据 6 个关节角计算末端位姿。不连接硬件。
+
+**运行**：
+
+```bash
+python example/5_fk_test.py
+> 0 0 0 0 0 0
+> 45 -30 15 -60 90 180
+```
+
+**输出**：
+
+- 末端位置 `(x, y, z)`，单位米
+- 旋转矩阵
+- roll / pitch / yaw，单位度
+
+---
+
+#### 6. 逆运动学测试（`6_ik_test.py`）
+
+根据目标末端位姿求解关节角。不连接硬件。
+
+**输入格式**：
+
+```text
+x y z                         # 米，保持零位 FK 的姿态
+x y z roll pitch yaw          # 米 + 度
+```
+
+**运行**：
+
+```bash
+python example/6_ik_test.py
+> 0.2603 0.0 0.1917
+> 0.2603 0.0 0.1917 0 0 0
+```
+
+---
+
+### 真机控制
+
+运行真机示例前，先检查设备权限：
+
+```bash
+# 达妙串口桥
+sudo chmod 666 /dev/ttyACM0
+
+# 如果使用 SocketCAN
+sudo ip link set can0 up type can bitrate 500000
+```
+
+#### 7. 末端 IK 控制（`7_arm_ik_control.py`）
+
+使用 `ArmEndPos`：C++ 求解 IK，Rust RT 循环执行求解出的关节目标。
+
+**运行**：
+
+```bash
+python example/7_arm_ik_control.py
+> 0.3 0.0 0.2
+> 0.3 0.1 0.25 0 0.5 0
+```
+
+**交互命令**：
+
+| 命令 | 说明 |
+|---|---|
+| `x y z [roll pitch yaw]` | 目标末端位姿，姿态单位为弧度 |
+| `state` | 打印当前关节状态和 RT overrun |
+| `pos` / `end_state` | 打印当前末端位姿 |
+| `q` / `quit` / `exit` | 退出 |
+
+---
+
+#### 8. 末端轨迹控制（`8_arm_traj_control.py`）
+
+使用 `ArmEndPos` 轨迹模式。C++ 规划并跟踪笛卡尔轨迹，Rust RT 循环执行流式关节目标。
+
+**输入格式**：
+
+```text
+x y z [roll pitch yaw] [duration]
+```
+
+**运行**：
+
+```bash
+python example/8_arm_traj_control.py
+> 0.3 0.0 0.3 0 0.4 0 2.0
+```
+
+`7_arm_ik_control.py` 和 `8_arm_traj_control.py` 退出时会调用 `ArmEndPos.end()`，
+也就是先执行 `safe_home()`，再断开连接。
+
+---
+
+#### 9. 重力补偿（`9_gravity_compensation.py`）
+
+使用 C++ dynamics 模型计算重力前馈力矩，并通过 Python 回调循环发送 MIT 指令。
+
+**控制律**：
+
+```text
+tau = g(q)
+pos = 当前关节位置
+循环指令中 kp = 0, kd = 1
+```
+
+**运行**：
+
+```bash
+python example/9_gravity_compensation.py --rate 200
+```
+
+按 `Ctrl+C` 停止并断开。
+
+---
+
+#### 10. 带速度锁止的重力补偿（`10_gravity_compensation_lock.py`）
+
+在重力补偿基础上加入末端速度锁止。TCP 速度低于阈值时锁定关节目标；用力推动超过阈值后更新锁定姿态。
+
+**运行**：
+
+```bash
+python example/10_gravity_compensation_lock.py --rate 200
+```
+
+常用参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--vel-threshold` | TCP 线速度阈值 |
+| `--w-threshold` | TCP 角速度阈值 |
+| `--kp`, `--kd` | MIT 锁止刚度和阻尼 |
+| `--integral-limit` | 积分力矩限幅 |
+
+---
+
+#### 11. 夹爪控制台（`gripper_test.py`）
+
+夹爪交互终端，用于设零、切换模式、发送 MIT/POS_VEL/VEL 指令。
+
+**运行**：
+
+```bash
+python example/gripper_test.py
+```
+
+**交互命令**：
+
+| 命令 | 说明 |
+|---|---|
+| `z` | 将当前夹爪位置设为零点 |
+| `m` | 切换 MIT / POS_VEL / VEL 模式 |
+| `c` | 发送或更新控制指令 |
+| `s` | 打印夹爪位置、速度、力矩 |
+| `q` | 停止循环、失能并断开 |
+
+---
+
+### MeshCat 仿真
+
+可选仿真示例位于 `example/sim/`。它们只是在可视化层需要 Python `meshcat` 和 Python
+`pinocchio`；运动学和轨迹计算仍然走本包的 C++ 绑定。
+
+```bash
+python example/sim/fk_sim.py
+python example/sim/ik_sim.py
+python example/sim/traj_sim.py
+```
 
 ---
 
@@ -137,3 +408,10 @@ with ArmEndPos(arm) as ep:
 - **MyActuator / RobStride / HighTorque** —— CAN。
 
 状态归一化、模式映射、控制指令派发均与 `motor_abi` 的 C-ABI 实现保持一致。
+
+## 致谢
+
+- [reBot-DevArm](https://github.com/Seeed-Projects/reBot-DevArm.git)：提供了本仓库内置 URDF、mesh、运动学、动力学和仿真示例使用的 B601 机械臂模型资源。
+- [reBotArm_control_py](https://github.com/vectorBH6/reBotArm_control_py.git)：提供了本仓库保持兼容的 Python API 形态和示例流程参考，本仓库在此基础上替换为原生 RT actuator 与 C++ 数学后端。
+- [motorbridge](https://github.com/motorbridge/motorbridge.git)：提供了 actuator 层直接依赖的 Rust 电机厂商 crate，用于 Damiao、MyActuator、RobStride、HighTorque 的通信和控制指令派发。
+- [Pinocchio](https://github.com/stack-of-tasks/pinocchio.git)：提供了 `_math` 链接使用的 C++ 运动学与动力学后端；本仓库直接使用 C++ 库，不依赖 Python binding。

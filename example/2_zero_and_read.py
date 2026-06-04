@@ -1,36 +1,61 @@
 #!/usr/bin/env python3
-"""机械臂零点校准 + 实时角度监控(失能状态)。"""
+"""Zero current motor positions, then print live joint state.
+
+This example disables motors during zeroing. Make sure the arm is supported and
+already placed at the desired zero pose before continuing.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
 import time
 from pathlib import Path
 
 import numpy as np
-import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
+
+SOURCE_PYTHON = Path(__file__).resolve().parents[1] / "python"
+if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
+    sys.path.insert(0, str(SOURCE_PYTHON))
+
 from rebotarm_control_rt.actuator import RobotArm
 
 
-def mit_controller(ref, dt):
-    ref.mit(np.zeros(ref.num_joints),
-            kp=np.zeros(ref.num_joints),
-            kd=np.zeros(ref.num_joints),
-            tau=np.zeros(ref.num_joints))
+def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--skip-zero", action="store_true", help="Only read state; do not call set_zero().")
+    parser.add_argument("--interval", type=float, default=0.05, help="Print interval in seconds.")
+    args = parser.parse_args()
+
+    arm = RobotArm(args.config)
+    try:
+        arm.connect()
+        print("--- connected ---")
+        print(f"joints: {list(arm.joint_names)}")
+
+        if not args.skip_zero:
+            answer = input("Set current pose as zero? Type YES to continue: ").strip()
+            if answer != "YES":
+                print("aborted")
+                return
+            arm.set_zero()
+            print("--- zero set ---")
+
+        print("--- live state in deg, Ctrl+C to exit ---")
+        while True:
+            pos, vel, torque = arm.get_state(request=True)
+            row = "  ".join(
+                f"{name}:{deg:+7.2f}"
+                for name, deg in zip(arm.joint_names, np.degrees(pos))
+            )
+            print(f"\r{row}  ", end="", flush=True)
+            time.sleep(max(args.interval, 0.001))
+    except (KeyboardInterrupt, EOFError):
+        pass
+    finally:
+        print()
+        arm.disconnect()
 
 
-arm = RobotArm()
-arm.connect()
-print("--- 连接成功 ---")
-arm.set_zero()
-print("--- 零点已设置 ---\n")
-
-print("\n--- 实时角度（deg）Ctrl+C 退出 ---\n")
-arm.start_control_loop(mit_controller)
-try:
-    while True:
-        positions = arm.get_positions()
-        row = "  ".join(f"{p*180/np.pi:+.2f}" for p in positions)
-        print(f"\r{row}  ", end="", flush=True)
-        time.sleep(0.002)
-except (KeyboardInterrupt, EOFError):
-    pass
-finally:
-    arm.disconnect()
+if __name__ == "__main__":
+    main()
