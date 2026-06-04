@@ -7,6 +7,11 @@ name = "rebotarm_control_rt"
 version = "0.1.0"
 description = "reBot Arm B601 控制库 —— Rust actuator (motorbridge) + C++ 数学层 (Pinocchio)，Python 仅上层接口"
 readme = "README.md"
+authors = [
+    { name = "dongyaolin" },
+]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 # 运行期仅需 numpy/pyyaml。运动学/动力学已下沉到 C++（链接 Pinocchio C++），
 # 不再依赖 Python 的 pinocchio/pin、meshcat、matplotlib。
