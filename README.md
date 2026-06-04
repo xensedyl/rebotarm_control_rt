@@ -359,9 +359,17 @@ Python `pinocchio` for visualization only; the kinematics and trajectory calcula
 this package's C++ bindings.
 
 ```bash
-python example/sim/fk_sim.py
-python example/sim/ik_sim.py
-python example/sim/traj_sim.py
+pip install meshcat
+conda install -c conda-forge "pinocchio>=3.2,<4"
+```
+
+If your shell has sourced ROS, clear both ROS Python and library paths when running the simulation
+examples.
+
+```bash
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/fk_sim.py
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/ik_sim.py
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/traj_sim.py
 ```
 
 ---

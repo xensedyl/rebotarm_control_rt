@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import math
-import signal
+import sys
 import time
+from pathlib import Path
 
 import numpy as np
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from rebotarm_control_rt.kinematics import IKParams, compute_fk, pos_rot_to_se3
 from rebotarm_control_rt.trajectory import (
@@ -19,12 +24,6 @@ from rebotarm_control_rt.trajectory import (
 from example.sim.visualizer import Visualizer
 
 LINEAR_SPEED = 0.1
-should_exit = False
-
-
-def signal_handler(sig, frame) -> None:
-    global should_exit
-    should_exit = True
 
 
 def rpy_xyz_to_matrix(roll: float, pitch: float, yaw: float) -> np.ndarray:
@@ -81,15 +80,17 @@ def run_trajectory(viz: Visualizer, model, frame_id: int, q_start: np.ndarray, q
     visited = []
     times = np.array([pt.time for pt in joint_traj], dtype=float)
     print("playing animation in MeshCat...")
-    for i, pt in enumerate(joint_traj):
-        if should_exit:
-            break
-        viz.update(pt.q)
-        if i < len(ee_positions):
-            visited.append(ee_positions[i])
-            viz.draw_actual_path(visited)
-        if i < len(times) - 1:
-            time.sleep(max(0.002, times[i + 1] - times[i]))
+    try:
+        for i, pt in enumerate(joint_traj):
+            viz.update(pt.q)
+            if i < len(ee_positions):
+                visited.append(ee_positions[i])
+                viz.draw_actual_path(visited)
+            if i < len(times) - 1:
+                time.sleep(max(0.002, times[i + 1] - times[i]))
+    except KeyboardInterrupt:
+        print("\ntrajectory interrupted.")
+        return []
 
     if joint_traj:
         joint_arr = np.array([pt.q for pt in joint_traj])
@@ -102,9 +103,6 @@ def run_trajectory(viz: Visualizer, model, frame_id: int, q_start: np.ndarray, q
 
 
 def main() -> None:
-    global should_exit
-    signal.signal(signal.SIGINT, signal_handler)
-
     print("loading MeshCat visualizer...")
     viz = Visualizer(open_browser=True)
     model = viz.model
@@ -113,16 +111,21 @@ def main() -> None:
     viz.update(q_last)
 
     ik_params = IKParams(max_iter=2000, tolerance=1e-4, step_size=0.5, damping=1e-6)
-    print("Input: x y z [roll pitch yaw] (meters / radians), q to exit\n")
+    print("Input: x y z [roll pitch yaw] (meters / radians), q to exit")
+    print("Examples:")
+    print("  0.20 0.10 0.20")
+    print("  0.24 -0.08 0.22")
+    print("  0.20 0.10 0.20 0 0.4 0\n")
 
-    while not should_exit:
+    while True:
         _, _, current = compute_fk(model, q_last)
         pos = current[:3, 3]
         rpy = matrix_to_rpy_xyz(current[:3, :3])
         print(f"pos[{pos[0]:.3f} {pos[1]:.3f} {pos[2]:.3f}] rpy[{rpy[0]:.3f} {rpy[1]:.3f} {rpy[2]:.3f}]> ", end="", flush=True)
         try:
             line = input().strip()
-        except EOFError:
+        except (KeyboardInterrupt, EOFError):
+            print("\nexit.")
             break
         if not line:
             continue

@@ -3,22 +3,17 @@
 from __future__ import annotations
 
 import math
-import signal
-import time
+import sys
+from pathlib import Path
 
 import numpy as np
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from rebotarm_control_rt.kinematics import compute_fk
 from example.sim.visualizer import Visualizer
-
-should_exit = False
-
-
-def signal_handler(sig, frame) -> None:
-    global should_exit
-    should_exit = True
-    print("\nexit.")
-
 
 def matrix_to_rpy_xyz(rot: np.ndarray) -> np.ndarray:
     sy = math.hypot(float(rot[0, 0]), float(rot[1, 0]))
@@ -34,21 +29,25 @@ def matrix_to_rpy_xyz(rot: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
-    signal.signal(signal.SIGINT, signal_handler)
     print("loading visualizer...")
     viz = Visualizer()
     q = np.zeros(viz.nq)
     viz.update(q)
 
     print("MeshCat is ready. Input joint angles in degrees.")
-    print("examples: 0 0 0 0 0 0 | 45 -30 15 -60 90 180")
+    print("Input format:")
+    print("  j1 j2 j3 j4 j5 j6          (degrees)")
+    print("Examples:")
+    print("  0 0 0 0 0 0")
+    print("  45 -30 -15 -60 90 60")
+    print("  30 -20 -30 -40 70 0")
     print("q / quit / exit to stop\n")
 
-    while not should_exit:
-        time.sleep(0.01)
+    while True:
         try:
             line = input("joint angles > ").strip().lower()
-        except EOFError:
+        except (KeyboardInterrupt, EOFError):
+            print("\nexit.")
             break
         if line in ("q", "quit", "exit", ""):
             break

@@ -348,9 +348,16 @@ python example/gripper_test.py
 `pinocchio`；运动学和轨迹计算仍然走本包的 C++ 绑定。
 
 ```bash
-python example/sim/fk_sim.py
-python example/sim/ik_sim.py
-python example/sim/traj_sim.py
+pip install meshcat
+conda install -c conda-forge "pinocchio>=3.2,<4"
+```
+
+如果当前 shell source 过 ROS，运行仿真示例时同时清掉 ROS 的 Python 路径和动态库路径。
+
+```bash
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/fk_sim.py
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/ik_sim.py
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/traj_sim.py
 ```
 
 ---

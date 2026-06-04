@@ -3,21 +3,17 @@
 from __future__ import annotations
 
 import math
-import signal
-import time
+import sys
+from pathlib import Path
 
 import numpy as np
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from rebotarm_control_rt.kinematics import IKParams, compute_fk, pos_rot_to_se3
 from example.sim.visualizer import Visualizer
-
-should_exit = False
-
-
-def signal_handler(sig, frame) -> None:
-    global should_exit
-    should_exit = True
-
 
 def rpy_xyz_to_matrix(rpy_rad: np.ndarray) -> np.ndarray:
     roll, pitch, yaw = [float(v) for v in rpy_rad]
@@ -31,7 +27,6 @@ def rpy_xyz_to_matrix(rpy_rad: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
-    signal.signal(signal.SIGINT, signal_handler)
     print("loading visualizer...")
     viz = Visualizer()
     viz.neutral()
@@ -43,13 +38,17 @@ def main() -> None:
     print("MeshCat is ready. Input target pose:")
     print("  x y z                    (meters, keep neutral orientation)")
     print("  x y z roll pitch yaw     (meters + radians)")
+    print("Examples:")
+    print("  0.26 0.00 0.19")
+    print("  0.20 0.10 0.20")
+    print("  0.20 0.10 0.20 0 0.4 0")
     print("q / quit / exit to stop\n")
 
-    while not should_exit:
-        time.sleep(0.01)
+    while True:
         try:
             line = input("target pose > ").strip().lower()
-        except EOFError:
+        except (KeyboardInterrupt, EOFError):
+            print("\nexit.")
             break
         if line in ("q", "quit", "exit", ""):
             break

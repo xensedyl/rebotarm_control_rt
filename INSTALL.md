@@ -79,6 +79,16 @@ Pinocchio C++ 前缀由 `cpp/CMakeLists.txt` **自动探测**，顺序：
 PINOCCHIO_PREFIX=/opt/openrobots ./build.sh --wheel
 ```
 
+可选 MeshCat 仿真示例还需要 Python 可视化依赖：
+
+```bash
+pip install meshcat
+conda install -c conda-forge "pinocchio>=3.2,<4"
+```
+
+如果当前 shell source 过 ROS，运行仿真示例时同时清掉 ROS 的 Python 路径和动态库路径：
+`env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/fk_sim.py`。
+
 ---
 
 ## 硬件与实时权限

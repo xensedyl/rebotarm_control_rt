@@ -8,6 +8,7 @@ C++ bindings.
 from __future__ import annotations
 
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -23,25 +24,46 @@ try:
     import meshcat.geometry as mcg
     import pinocchio as pin
     from pinocchio.visualize import MeshcatVisualizer
-except ModuleNotFoundError as exc:  # pragma: no cover - optional GUI dependency
+except (ModuleNotFoundError, ImportError) as exc:  # pragma: no cover - optional GUI dependency
+    missing = getattr(exc, "name", None)
+    what = f": {missing}" if missing else ""
     raise SystemExit(
-        "example/sim requires Python packages: meshcat and pinocchio. "
-        "Install them in the active environment before running this example."
+        f"example/sim cannot import optional visualization dependency{what}\n"
+        f"{type(exc).__name__}: {exc}\n\n"
+        "Install simulation visualization dependencies in the active environment:\n"
+        "  pip install meshcat\n"
+        '  conda install -c conda-forge "pinocchio>=3.2,<4"\n'
+        "If your shell has sourced ROS, clear both ROS Python and library paths when running examples:\n"
+        "  env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/fk_sim.py\n"
+        "Note: the RT package itself does not depend on Python pinocchio; "
+        "only MeshCat visualization examples need it."
     ) from exc
 
 from rebotarm_control_rt.kinematics import _URDF, compute_fk, load_robot_model
 
 
+def _mesh_resolved_urdf() -> str:
+    src = Path(_URDF)
+    text = src.read_text(encoding="utf-8")
+    text = text.replace(
+        "package://reBot-DevArm_description_fixend/",
+        f"file://{src.parents[1]}/",
+    )
+    tmp = tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False, encoding="utf-8")
+    with tmp:
+        tmp.write(text)
+    return tmp.name
+
+
 class Visualizer:
     def __init__(self, open_browser: bool = True) -> None:
-        urdf_path = _URDF
-        pkg_dir = str(Path(urdf_path).parents[2])
+        urdf_path = _mesh_resolved_urdf()
 
         self._rt_model = load_robot_model()
         self._model = pin.buildModelFromUrdf(urdf_path)
         self._data = self._model.createData()
         self._visual_model = pin.buildGeomFromUrdf(
-            self._model, urdf_path, pin.GeometryType.VISUAL, package_dirs=[pkg_dir]
+            self._model, urdf_path, pin.GeometryType.VISUAL
         )
         self._visual_data = self._visual_model.createData()
         self._meshcat_viz = meshcat.Visualizer(zmq_url=None)
