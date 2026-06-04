@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import argparse
 import math
-import signal
 import sys
 from pathlib import Path
 
@@ -42,15 +41,6 @@ def main() -> None:
     parser.add_argument("--cpu", type=int, default=None, help="Optional CPU affinity.")
     parser.add_argument("--request-feedback", action="store_true", help="Request feedback from RT loop.")
     args = parser.parse_args()
-
-    interrupted = {"stop": False}
-
-    def signal_handler(sig, frame) -> None:
-        interrupted["stop"] = True
-        print("\n[ctrl+c] exiting...")
-
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
 
     arm = RobotArm(args.config)
     try:
@@ -192,10 +182,11 @@ def main() -> None:
 
         print("commands: enable / disable / set_zero / mode / mit / posvel / vel / state / q")
         print("examples: mit 10 0 20 2 0 | posvel 10 1.0 | vel 0.2")
-        while not interrupted["stop"]:
+        while True:
             try:
                 line = input("> ").strip()
-            except EOFError:
+            except (KeyboardInterrupt, EOFError):
+                print("\n[exit]")
                 break
             if not line:
                 continue
@@ -217,6 +208,7 @@ def main() -> None:
                 print(f"error: {exc}")
     finally:
         try:
+            arm.stop_control_loop()
             arm.disconnect()
         except Exception as exc:
             print(f"disconnect error: {exc}", file=sys.stderr)

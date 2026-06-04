@@ -84,7 +84,9 @@ PINOCCHIO_PREFIX=/opt/openrobots ./build.sh --wheel
 ## 硬件与实时权限
 
 ```bash
-# 串口免 sudo（Damiao @ /dev/ttyACM0, 921600）：加入 dialout 组后重新登录
+# 串口免 sudo（Damiao @ /dev/ttyACM*，921600）：加入 dialout 组后重新登录
+# 先用 ls 确认实际端口，再把 config/arm.yaml / config/gripper.yaml 的 channel 改成对应 tty。
+ls -l /dev/ttyACM* /dev/ttyUSB*
 sudo usermod -aG dialout "$USER"
 
 # 让 RT 循环可申请 SCHED_FIFO（仅 PREEMPT_RT 内核有意义）：

@@ -34,7 +34,32 @@ from pathlib import Path
 from rebotarm_control_rt import _native
 from rebotarm_control_rt._native import JointCfg, GripperCfg
 
+# 这个路径在 ./rebotarm_control_rt/python/rebotarm_control_rt/config/arm.yaml
 _CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
+
+
+def _append_serial_help(exc: Exception, cfg_path: str) -> Exception:
+    msg = str(exc)
+    if "open serial port" not in msg:
+        return exc
+    help_msg = (
+        f"{msg}\n\n"
+        "Serial port troubleshooting:\n"
+        "  1. List current devices:\n"
+        "       ls -l /dev/ttyACM* /dev/ttyUSB*\n"
+        "       ls -l /dev/serial/by-id/\n"
+        f"  2. Edit the YAML config used by this run:\n"
+        f"       {cfg_path}\n"
+        "     and set channel to the actual Damiao bridge, for example:\n"
+        "       channel: /dev/ttyACM1    # replace with the port shown by ls\n"
+        "  3. If the error is 'Device or resource busy', another process is still holding the port.\n"
+        "     Stop the old process or check it with:\n"
+        "       fuser -v /dev/ttyACM1    # replace with the busy port\n"
+        "       lsof /dev/ttyACM1\n"
+        "  4. If permissions are denied, allow access to the actual port:\n"
+        "       sudo chmod 666 /dev/ttyACM1\n"
+    )
+    return ValueError(help_msg)
 
 
 # 注意：PyO3 #[new] 对应 __new__（而非 __init__），构造发生在 __new__。
@@ -46,7 +71,10 @@ class RobotArm(_native.RobotArm):
     def __new__(cls, cfg_path: str | None = None):
         if cfg_path is None:
             cfg_path = str(_CONFIG_DIR / "arm.yaml")
-        return super().__new__(cls, cfg_path)
+        try:
+            return super().__new__(cls, cfg_path)
+        except ValueError as exc:
+            raise _append_serial_help(exc, cfg_path) from exc
 
     def __init__(self, cfg_path: str | None = None) -> None:  # noqa: D401
         pass
@@ -58,7 +86,10 @@ class Gripper(_native.Gripper):
     def __new__(cls, cfg_path: str | None = None):
         if cfg_path is None:
             cfg_path = str(_CONFIG_DIR / "gripper.yaml")
-        return super().__new__(cls, cfg_path)
+        try:
+            return super().__new__(cls, cfg_path)
+        except ValueError as exc:
+            raise _append_serial_help(exc, cfg_path) from exc
 
     def __init__(self, cfg_path: str | None = None) -> None:
         pass

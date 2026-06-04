@@ -1,6 +1,7 @@
 # reBotArm 机械臂配置文件
 
-# 通信方式: CAN (can0 / can1) 或 串口桥 (/dev/ttyACM0)
+# 通信方式: CAN (can0 / can1) 或串口桥 (/dev/ttyACM0 等)
+# 运行前用 `ls -l /dev/ttyACM* /dev/ttyUSB*` 确认实际端口；USB 重插后编号可能变化。
 channel: /dev/ttyACM0
 
 # 控制循环频率 (Hz)

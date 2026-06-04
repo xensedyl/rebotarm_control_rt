@@ -220,7 +220,12 @@ python example/6_ik_test.py
 运行真机示例前，先检查设备权限：
 
 ```bash
-# 达妙串口桥
+# 达妙串口桥。先查看 USB 适配器实际枚举出来的 tty。
+ls -l /dev/ttyACM* /dev/ttyUSB*
+ls -l /dev/serial/by-id/
+
+# 然后修改 python/rebotarm_control_rt/config/arm.yaml 和 gripper.yaml：
+#   channel: /dev/ttyACM0    # 或 /dev/ttyACM1、/dev/ttyACM2 等
 sudo chmod 666 /dev/ttyACM0
 
 # 如果使用 SocketCAN

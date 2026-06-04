@@ -227,7 +227,12 @@ python example/6_ik_test.py
 Before running hardware examples, check device permissions:
 
 ```bash
-# Damiao serial bridge
+# Damiao serial bridge. First find the actual tty created by the USB adapter.
+ls -l /dev/ttyACM* /dev/ttyUSB*
+ls -l /dev/serial/by-id/
+
+# Then update python/rebotarm_control_rt/config/arm.yaml and gripper.yaml:
+#   channel: /dev/ttyACM0    # or /dev/ttyACM1, /dev/ttyACM2, ...
 sudo chmod 666 /dev/ttyACM0
 
 # SocketCAN, if used
