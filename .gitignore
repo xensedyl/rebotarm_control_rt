@@ -10,3 +10,4 @@ __pycache__/
 
 /python/rebotarm_control_rt/_native*.so
 /python/rebotarm_control_rt/_math*.so
+/python/rebotarm_control_rt/librebotarm_math*.so

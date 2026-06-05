@@ -61,11 +61,47 @@ find_library(TINYXML2_LIB NAMES tinyxml2
   HINTS "${PINOCCHIO_PREFIX}/lib" "${PINOCCHIO_PREFIX}/lib/x86_64-linux-gnu"
         /usr/local/lib /usr/lib/x86_64-linux-gnu)
 
-pybind11_add_module(_math
-  src/bindings.cpp
+set(REBOTARM_MATH_CORE_SOURCES
   src/robot_model.cpp
   src/dynamics.cpp
   src/trajectory.cpp
+  src/math_c_api.cpp
+)
+
+add_library(rebotarm_math SHARED
+  ${REBOTARM_MATH_CORE_SOURCES}
+)
+target_include_directories(rebotarm_math PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}/include
+  ${PINOCCHIO_PREFIX}/include
+)
+target_compile_definitions(rebotarm_math PUBLIC PINOCCHIO_WITH_URDFDOM)
+target_link_libraries(rebotarm_math PUBLIC ${PINOCCHIO_DEFAULT_LIB})
+if(PINOCCHIO_PARSERS_LIB)
+  target_link_libraries(rebotarm_math PUBLIC ${PINOCCHIO_PARSERS_LIB})
+endif()
+if(URDFDOM_MODEL_LIB)
+  target_link_libraries(rebotarm_math PUBLIC ${URDFDOM_MODEL_LIB})
+endif()
+if(CONSOLE_BRIDGE_LIB)
+  target_link_libraries(rebotarm_math PUBLIC ${CONSOLE_BRIDGE_LIB})
+endif()
+if(TINYXML2_LIB)
+  target_link_libraries(rebotarm_math PUBLIC ${TINYXML2_LIB})
+endif()
+if(Eigen3_FOUND)
+  target_link_libraries(rebotarm_math PUBLIC Eigen3::Eigen)
+else()
+  target_include_directories(rebotarm_math PUBLIC ${EIGEN3_INCLUDE_DIR})
+endif()
+set_target_properties(rebotarm_math PROPERTIES
+  LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../python/rebotarm_control_rt
+  OUTPUT_NAME "rebotarm_math"
+  BUILD_RPATH "${PINO_LIBDIR}"
+  INSTALL_RPATH "${PINO_LIBDIR}")
+
+pybind11_add_module(_math
+  src/bindings.cpp
   src/arm_endpos.cpp
 )
 target_include_directories(_math PRIVATE
@@ -73,19 +109,7 @@ target_include_directories(_math PRIVATE
   ${PINOCCHIO_PREFIX}/include
 )
 target_compile_definitions(_math PRIVATE PINOCCHIO_WITH_URDFDOM)
-target_link_libraries(_math PRIVATE ${PINOCCHIO_DEFAULT_LIB})
-if(PINOCCHIO_PARSERS_LIB)
-  target_link_libraries(_math PRIVATE ${PINOCCHIO_PARSERS_LIB})
-endif()
-if(URDFDOM_MODEL_LIB)
-  target_link_libraries(_math PRIVATE ${URDFDOM_MODEL_LIB})
-endif()
-if(CONSOLE_BRIDGE_LIB)
-  target_link_libraries(_math PRIVATE ${CONSOLE_BRIDGE_LIB})
-endif()
-if(TINYXML2_LIB)
-  target_link_libraries(_math PRIVATE ${TINYXML2_LIB})
-endif()
+target_link_libraries(_math PRIVATE rebotarm_math)
 if(Eigen3_FOUND)
   target_link_libraries(_math PRIVATE Eigen3::Eigen)
 else()
@@ -96,5 +120,5 @@ endif()
 set_target_properties(_math PROPERTIES
   LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../python/rebotarm_control_rt
   OUTPUT_NAME "_math"
-  BUILD_RPATH "${PINO_LIBDIR}"
-  INSTALL_RPATH "${PINO_LIBDIR}")
+  BUILD_RPATH "${CMAKE_CURRENT_SOURCE_DIR}/../python/rebotarm_control_rt;${PINO_LIBDIR}"
+  INSTALL_RPATH "$ORIGIN;${PINO_LIBDIR}")

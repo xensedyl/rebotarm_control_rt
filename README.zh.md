@@ -37,7 +37,7 @@ rebotarm_control_rt/
 │   └── urdf/
 ├── example/
 │   ├── python/                          # Python 示例和 MeshCat 仿真
-│   └── rust/                            # 直接使用 motorbridge crate 的 Rust 示例
+│   └── rust/                            # 使用 motorbridge + C++ math C ABI 的 Rust 示例
 ├── tests/
 └── build.sh
 ```
@@ -59,8 +59,9 @@ bash ./setup_env.sh --install
 
 ### 构建流程
 
-`build.sh` 先用 CMake 编出 `_math.so`（链接 Pinocchio C++）落入包目录，再用 maturin 把
-`_native`（Rust）+ `_math.so` + Python 打进同一个 wheel 并安装。
+`build.sh` 先用 CMake 编出 `librebotarm_math.so` 和 `_math.so`（链接 Pinocchio C++）落入包目录，
+再用 maturin 把 `_native`（Rust）+ `_math.so` + Python 打进同一个 wheel 并安装。Rust 示例需要
+FK、IK 或重力补偿时，会通过 C ABI 直接动态加载 `librebotarm_math.so`。
 
 - **Pinocchio C++ 前缀自动探测**：
   `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `/usr/local` > `/usr`。
@@ -71,6 +72,16 @@ bash ./setup_env.sh --install
 
 > ⚠️ 用 conda-forge 的 **Pinocchio 3.x**（`pinocchio>=3.2,<4`）。4.0 重排了头文件布局，
 > 当前代码按 3.x 编写。
+
+### 构建检查
+
+执行 `setup_env.sh --install` 或 `./build.sh --wheel` 后，先激活安装时使用的同一个环境，再检查两个
+native module 是否都能导入：
+
+```bash
+conda activate rebot
+python -c "import rebotarm_control_rt._math, rebotarm_control_rt._native; print('ok')"
+```
 
 ### 实时性说明
 

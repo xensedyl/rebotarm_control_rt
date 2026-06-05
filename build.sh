@@ -41,7 +41,7 @@ cmake -S "$HERE/cpp" -B "$HERE/cpp/build" \
   -DPYTHON_EXECUTABLE="$PY" \
   "${CMAKE_PINO_ARG[@]}"
 cmake --build "$HERE/cpp/build" -j"$(nproc)"
-echo "== built _math.so into python/rebotarm_control_rt/ =="
+echo "== built _math.so and librebotarm_math.so into python/rebotarm_control_rt/ =="
 
 if [[ "${1:-}" == "--wheel" ]]; then
   # 清掉旧 wheel：dist/ 可能残留其它 Python ABI（如 cp312）的 wheel，
@@ -57,6 +57,7 @@ PYEOF
 )"
   mkdir -p "$PKG_DST"
   cp "$HERE"/python/rebotarm_control_rt/_math*.so "$PKG_DST/"
+  cp "$HERE"/python/rebotarm_control_rt/librebotarm_math*.so "$PKG_DST/"
   # 同时把 _native.so 释放进源码树，使 PYTHONPATH=$HERE/python 可直接运行（免装 wheel）。
   "$PY" - "$HERE" <<'PYEOF'
 import glob, os, sys, zipfile

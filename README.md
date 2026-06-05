@@ -38,7 +38,7 @@ rebotarm_control_rt/
 │   └── urdf/
 ├── example/
 │   ├── python/                          # Python examples and MeshCat simulations
-│   └── rust/                            # Rust-only examples using motorbridge crates directly
+│   └── rust/                            # Rust examples using motorbridge + C++ math C ABI
 ├── tests/
 └── build.sh
 ```
@@ -60,9 +60,10 @@ bash ./setup_env.sh --install
 
 ### How the build works
 
-`build.sh` first compiles `_math.so` with CMake (linking Pinocchio C++) into the package
-directory, then uses maturin to pack `_native` (Rust) + `_math.so` + Python into a single wheel
-and install it.
+`build.sh` first compiles `librebotarm_math.so` and `_math.so` with CMake (linking Pinocchio C++)
+into the package directory, then uses maturin to pack `_native` (Rust) + `_math.so` + Python into a
+single wheel and install it. The Rust examples load `librebotarm_math.so` directly through a C ABI
+when they need FK, IK, or gravity compensation.
 
 - **Automatic Pinocchio C++ prefix detection**:
   `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `/usr/local` > `/usr`.
@@ -73,6 +74,16 @@ and install it.
 
 > ⚠️ Use **Pinocchio 3.x** from conda-forge (`pinocchio>=3.2,<4`). 4.0 reorganized the header
 > layout; the current code targets 3.x.
+
+### Build check
+
+After `setup_env.sh --install` or `./build.sh --wheel`, activate the same environment used for the
+install and verify that both native modules can be imported:
+
+```bash
+conda activate rebot
+python -c "import rebotarm_control_rt._math, rebotarm_control_rt._native; print('ok')"
+```
 
 ### Real-time note
 
