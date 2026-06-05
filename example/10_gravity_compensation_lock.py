@@ -113,6 +113,26 @@ def _lock_command_vectors(arm, model_nq: int, q_target: np.ndarray, tau_g: np.nd
     return pos, vel, kp, kd, tau
 
 
+def _release_mit_torque_hold(arm, frames: int = 10, dt_s: float = 0.02) -> None:
+    """Send a short zero-torque MIT hold before leaving gravity compensation."""
+    q_all = np.asarray(arm.get_positions(request=True), dtype=float)
+    n = arm.num_joints
+    if q_all.size != n:
+        q_all = np.resize(q_all, n)
+    zeros = np.zeros(n, dtype=float).tolist()
+    pos = q_all.tolist()
+    for _ in range(frames):
+        arm.mit(
+            pos=pos,
+            vel=zeros,
+            kp=zeros,
+            kd=zeros,
+            tau=zeros,
+            request_feedback=False,
+        )
+        time.sleep(dt_s)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
@@ -153,6 +173,7 @@ def main() -> None:
     print("-" * 65)
 
     arm = RobotArm(args.config)
+    connected = False
     q_target: np.ndarray | None = None
     integral: np.ndarray | None = None
     counter = 0
@@ -161,6 +182,7 @@ def main() -> None:
 
     try:
         arm.connect()
+        connected = True
         print("[connect] OK")
         arm.enable()
         print("[enable] OK")
@@ -237,7 +259,12 @@ def main() -> None:
                 time.sleep(dt - elapsed)
     finally:
         print("\n[stop] disconnecting...")
-        arm.disconnect()
+        if connected:
+            try:
+                _release_mit_torque_hold(arm)
+            except Exception as exc:
+                print(f"[stop] failed to release MIT torque cleanly: {exc}")
+            arm.disconnect()
         print("[done] disconnected")
 
 

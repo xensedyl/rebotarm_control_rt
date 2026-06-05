@@ -640,6 +640,16 @@ impl RobotArm {
         self.inner.snapshot().0.into_pyarray(py)
     }
 
+    #[pyo3(signature = (attempts=20))]
+    fn get_positions_blocking<'py>(&self, py: Python<'py>, attempts: usize) -> PyResult<Bound<'py, PyArray1<f64>>> {
+        match self.inner.read_positions_blocking(attempts) {
+            Some(pos) => Ok(pos.into_pyarray(py)),
+            None => Err(PyRuntimeError::new_err(
+                "无法读取全部关节位置；未建立安全初始目标，请检查电机反馈和串口/CAN 通信",
+            )),
+        }
+    }
+
     #[pyo3(signature = (request=false))]
     fn get_velocities<'py>(&self, py: Python<'py>, request: bool) -> Bound<'py, PyArray1<f64>> {
         if request {
