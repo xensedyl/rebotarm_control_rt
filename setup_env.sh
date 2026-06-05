@@ -118,6 +118,9 @@ print("  FK(neutral) shape:", L.fk(L.neutral())[2].shape)
 print("[OK] rebotarm_control_rt 安装成功")
 PYEOF
     echo -e "\n[INFO] 完成。跑测试：pip install pytest && bash ./run_tests.sh"
+    echo "[INFO] 构建成功检查："
+    echo "  conda activate rebot"
+    echo "  python -c \"import rebotarm_control_rt._math, rebotarm_control_rt._native; print('ok')\""
 }
 
 # ── 解析参数 ─────────────────────────────────────────────────────────────────
