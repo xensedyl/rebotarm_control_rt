@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Interactive RT-native POS_VEL position control.
+"""Interactive RT-native MIT position control.
 
 Python only updates targets. The control loop runs on a Rust thread.
-Input n joint angles in degrees. Optional trailing value overrides vlim.
+Input n joint angles in degrees. Optional trailing values override kp/kd.
 """
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import numpy as np
 
-SOURCE_PYTHON = Path(__file__).resolve().parents[1] / "python"
+SOURCE_PYTHON = Path(__file__).resolve().parents[2] / "python"
 if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
 
@@ -42,12 +42,13 @@ def main() -> None:
         print("--- connected ---")
         arm.enable()
         print("--- enabled ---")
-        arm.mode_pos_vel()
-        print("--- POS_VEL mode ---")
+        arm.mode_mit()
+        print("--- MIT mode ---")
 
         n = arm.num_joints
         names = list(arm.joint_names)
-        vlim = np.array([j.vlim for j in arm._joints], dtype=np.float64)
+        kp = np.array([j.kp for j in arm._joints], dtype=np.float64)
+        kd = np.array([j.kd for j in arm._joints], dtype=np.float64)
 
         # Do not set a target before start_rt_loop: native loop will hold current pose.
         arm.start_rt_loop(
@@ -58,7 +59,7 @@ def main() -> None:
         )
         print(f"joints: {names}")
         print("RT loop started. First target is current pose hold.")
-        print("Input: q1 ... qN [vlim], 'state', or 'q'. Angles are degrees.")
+        print("Input: q1 ... qN [kp kd], 'state', or 'q'. Angles are degrees.")
 
         while True:
             line = input("> ").strip()
@@ -77,10 +78,12 @@ def main() -> None:
                 continue
             target_deg = np.array([float(v) for v in values[:n]], dtype=np.float64)
             if len(values) >= n + 1:
-                vlim[:] = float(values[n])
+                kp[:] = float(values[n])
+            if len(values) >= n + 2:
+                kd[:] = float(values[n + 1])
 
-            arm.set_targets(pos=np.radians(target_deg).tolist(), vlim=vlim.tolist())
-            print(f"  target(deg): {[round(float(x), 2) for x in target_deg]}  vlim={vlim[0]:.3f} rad/s")
+            arm.set_targets(pos=np.radians(target_deg).tolist(), kp=kp.tolist(), kd=kd.tolist())
+            print(f"  target(deg): {[round(float(x), 2) for x in target_deg]}  kp={kp[0]:.2f} kd={kd[0]:.2f}")
     except (KeyboardInterrupt, EOFError):
         pass
     finally:

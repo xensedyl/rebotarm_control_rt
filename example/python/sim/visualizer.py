@@ -14,7 +14,7 @@ from pathlib import Path
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 SOURCE_PYTHON = REPO_ROOT / "python"
 if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
@@ -28,13 +28,13 @@ except (ModuleNotFoundError, ImportError) as exc:  # pragma: no cover - optional
     missing = getattr(exc, "name", None)
     what = f": {missing}" if missing else ""
     raise SystemExit(
-        f"example/sim cannot import optional visualization dependency{what}\n"
+        f"example/python/sim cannot import optional visualization dependency{what}\n"
         f"{type(exc).__name__}: {exc}\n\n"
         "Install simulation visualization dependencies in the active environment:\n"
         "  pip install meshcat\n"
         '  conda install -c conda-forge "pinocchio>=3.2,<4"\n'
         "If your shell has sourced ROS, clear both ROS Python and library paths when running examples:\n"
-        "  env -u PYTHONPATH -u LD_LIBRARY_PATH python example/sim/fk_sim.py\n"
+        "  env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/fk_sim.py\n"
         "Note: the RT package itself does not depend on Python pinocchio; "
         "only MeshCat visualization examples need it."
     ) from exc

@@ -9,9 +9,11 @@ from pathlib import Path
 
 import numpy as np
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+REPO_ROOT = Path(__file__).resolve().parents[3]
+EXAMPLE_PYTHON_ROOT = Path(__file__).resolve().parents[1]
+for path in (REPO_ROOT, EXAMPLE_PYTHON_ROOT):
+    if str(path) not in sys.path:
+        sys.path.insert(0, str(path))
 
 from rebotarm_control_rt.kinematics import IKParams, compute_fk, pos_rot_to_se3
 from rebotarm_control_rt.trajectory import (
@@ -21,7 +23,7 @@ from rebotarm_control_rt.trajectory import (
     compute_traj_stats,
     plan_joint_space_trajectory,
 )
-from example.sim.visualizer import Visualizer
+from sim.visualizer import Visualizer
 
 LINEAR_SPEED = 0.1
 

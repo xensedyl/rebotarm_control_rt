@@ -5,7 +5,7 @@ This example keeps Python callback control because each cycle computes a
 dynamics feed-forward torque from the current joint state.
 
 Use on hardware only:
-    python example/9_gravity_compensation.py [--config arm.yaml] [--rate 200]
+    python example/python/9_gravity_compensation.py [--config arm.yaml] [--rate 200]
 
 Ctrl+C stops the control loop and disconnects.
 """
@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-SOURCE_PYTHON = Path(__file__).resolve().parents[1] / "python"
+SOURCE_PYTHON = Path(__file__).resolve().parents[2] / "python"
 if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
 

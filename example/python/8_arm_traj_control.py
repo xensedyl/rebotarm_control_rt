@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""ArmEndPos 交互控制示例（IK 模式）。
+"""ArmEndPos 交互控制示例（轨迹规划模式）。
 
 用法:
-    python example/7_arm_ik_control.py [--config arm.yaml]
+    python example/python/8_arm_traj_control.py [--config arm.yaml]
 
 输入:
-    x y z [roll pitch yaw]   目标末端位置（米 / 弧度）
-    q / quit / exit          退出
-    state                    当前状态
-    pos / end_state          当前末端位置
+    x y z [roll pitch yaw] [duration]   目标末端位置（米 / 弧度 / 秒）
+    q / quit / exit                     退出
+    state                               当前状态
+    pos / end_state                     当前末端位置
 
 退出时 ArmEndPos.end() 会先 safe_home，再断开连接。
 """
@@ -17,7 +17,7 @@ import argparse
 import sys
 from pathlib import Path
 
-SOURCE_PYTHON = Path(__file__).resolve().parents[1] / "python"
+SOURCE_PYTHON = Path(__file__).resolve().parents[2] / "python"
 if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
 
@@ -67,22 +67,26 @@ def main() -> None:
             try:
                 vals = [float(v) for v in line.split()]
             except ValueError:
-                print("  格式: x y z [roll pitch yaw]")
+                print("  格式: x y z [roll pitch yaw] [duration]")
                 continue
 
-            if len(vals) not in (3, 6):
-                print("  格式: x y z [roll pitch yaw]")
+            if len(vals) not in (3, 6, 7):
+                print("  格式: x y z [roll pitch yaw] [duration]")
                 continue
 
             x, y, z = vals[0], vals[1], vals[2]
             roll = vals[3] if len(vals) >= 6 else 0.0
             pitch = vals[4] if len(vals) >= 6 else 0.0
             yaw = vals[5] if len(vals) >= 6 else 0.0
+            duration = vals[6] if len(vals) >= 7 else 2.0
 
-            ok = arm_endpos_control.move_to_ik(x=x, y=y, z=z, roll=roll, pitch=pitch, yaw=yaw)
+            ok = arm_endpos_control.move_to_traj(
+                x=x, y=y, z=z,
+                roll=roll, pitch=pitch, yaw=yaw,
+                duration=duration,
+            )
             print(f"  -> ({x:+.3f}, {y:+.3f}, {z:+.3f})  "
-                  f"rpy=[{roll:+.2f} {pitch:+.2f} {yaw:+.2f}]  "
-                  f"{'ok' if ok else 'fail'}")
+                  f"T={duration:.1f}s  {'ok' if ok else 'fail'}")
     finally:
         arm_endpos_control.end()
     print("\n完成。")

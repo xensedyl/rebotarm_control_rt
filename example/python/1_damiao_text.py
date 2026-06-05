@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Single Damiao motor test through rebotarm_control_rt RobotArm.
+"""Single Damiao motor terminal, kept with the reBotArm_control_py filename.
 
 This mirrors reBotArm_control_py's motorbridge example, but uses the RT
 RobotArm API and controls one selected joint while holding the others.
@@ -13,7 +13,7 @@ from pathlib import Path
 
 import numpy as np
 
-SOURCE_PYTHON = Path(__file__).resolve().parents[1] / "python"
+SOURCE_PYTHON = Path(__file__).resolve().parents[2] / "python"
 if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
 
