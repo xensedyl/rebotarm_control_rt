@@ -770,6 +770,40 @@ impl RobotArm {
             .map_err(PyRuntimeError::new_err)
     }
 
+    #[pyo3(signature = (name, rid, timeout_ms=200))]
+    fn get_damiao_register_f32(&self, name: String, rid: u8, timeout_ms: u64) -> PyResult<f32> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .get_register_f32(rid, timeout_ms)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    #[pyo3(signature = (timeout_ms=200))]
+    fn get_pos_vel_gains(&self, timeout_ms: u64) -> PyResult<HashMap<String, (f32, f32, f32, f32)>> {
+        let mut gains = HashMap::new();
+        for name in &self.inner.order {
+            let motor = self
+                .inner
+                .motor(name)
+                .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?;
+            let vel_kp = motor.get_register_f32(25, timeout_ms).map_err(|e| {
+                PyRuntimeError::new_err(format!("read {name}.vel_kp register 25 failed: {e}"))
+            })?;
+            let vel_ki = motor.get_register_f32(26, timeout_ms).map_err(|e| {
+                PyRuntimeError::new_err(format!("read {name}.vel_ki register 26 failed: {e}"))
+            })?;
+            let pos_kp = motor.get_register_f32(27, timeout_ms).map_err(|e| {
+                PyRuntimeError::new_err(format!("read {name}.pos_kp register 27 failed: {e}"))
+            })?;
+            let pos_ki = motor.get_register_f32(28, timeout_ms).map_err(|e| {
+                PyRuntimeError::new_err(format!("read {name}.pos_ki register 28 failed: {e}"))
+            })?;
+            gains.insert(name.clone(), (vel_kp, vel_ki, pos_kp, pos_ki));
+        }
+        Ok(gains)
+    }
+
     // ---------------- 控制命令 ----------------
 
     #[pyo3(signature = (pos, vel=None, kp=None, kd=None, tau=None, request_feedback=true))]

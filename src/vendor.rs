@@ -302,6 +302,15 @@ impl UniMotor {
         }
     }
 
+    pub fn get_register_f32(&self, rid: u8, timeout_ms: u64) -> Result<f32, String> {
+        match self {
+            UniMotor::Damiao(m) => m
+                .get_register_f32(rid, Duration::from_millis(timeout_ms))
+                .map_err(|e| e.to_string()),
+            _ => Err("寄存器读取仅 Damiao 支持".to_string()),
+        }
+    }
+
     /// 设置电机侧 CAN 超时看门狗（ms）：超时未收到控制帧则电机自动停机。
     /// 镜像 motor_abi 的 set_can_timeout_ms：Damiao 写寄存器 9（值=ms*20），RobStride 写 0x7028。
     /// timeout_ms=0 表示禁用看门狗。

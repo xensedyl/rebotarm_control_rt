@@ -227,6 +227,8 @@ ls -l /dev/serial/by-id/
 # 然后修改 python/rebotarm_control_rt/config/arm.yaml 和 gripper.yaml：
 #   channel: /dev/ttyACM0    # 或 /dev/ttyACM1、/dev/ttyACM2 等
 sudo chmod 666 /dev/ttyACM0
+# 或者直接
+sudo chmod 666 /dev/ttyACM*
 
 # 如果使用 SocketCAN
 sudo ip link set can0 up type can bitrate 500000
