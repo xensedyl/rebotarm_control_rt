@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import tempfile
 from pathlib import Path
 
 SOURCE_PYTHON = Path(__file__).resolve().parents[1] / "python"
@@ -20,20 +21,48 @@ if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
 from rebotarm_control_rt.actuator import RobotArm
 
 
-DEFAULT_BI_CONFIGS = [
-    Path.home()
-    / ".cache/huggingface/lerobot/calibration/robots/bi_seeed_b601_rt_follower/left_follower_rt_arm.yaml",
-    Path.home()
-    / ".cache/huggingface/lerobot/calibration/robots/bi_seeed_b601_rt_follower/right_follower_rt_arm.yaml",
+B601_JOINTS = [
+    ("shoulder_pan", 0x01, 0x11, "4340P"),
+    ("shoulder_lift", 0x02, 0x12, "4340P"),
+    ("elbow_flex", 0x03, 0x13, "4340P"),
+    ("wrist_flex", 0x04, 0x14, "4310"),
+    ("wrist_yaw", 0x05, 0x15, "4310"),
+    ("wrist_roll", 0x06, 0x16, "4310"),
+    ("gripper", 0x07, 0x17, "4310"),
 ]
 
 
-def read_one(config: str | None, timeout_ms: int) -> None:
-    label = config if config else "package default arm.yaml"
+def make_b601_config(port: str, path: Path) -> Path:
+    lines = [
+        "# Temporary config for reading Damiao registers.",
+        "name: reBotArmB601RTRegisterRead",
+        f"channel: {port}",
+        "rate: 150.0",
+        "",
+        "joints:",
+    ]
+    for name, motor_id, feedback_id, model in B601_JOINTS:
+        lines.extend(
+            [
+                f"  - name: {name}",
+                f"    motor_id: 0x{motor_id:02X}",
+                f"    feedback_id: 0x{feedback_id:02X}",
+                f"    model: \"{model}\"",
+                "    vendor: \"damiao\"",
+                "    POS_VEL:",
+                "      vlim: 2.0",
+                "",
+            ]
+        )
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def read_one(config: str | None, label: str, timeout_ms: int) -> None:
     arm = RobotArm(config)
     try:
         arm.connect()
-        print(f"\n[{arm.name}] {label}")
+        print(f"\n[{label}] {arm.name}")
         print(f"{'joint':<16} {'vel_kp':>10} {'vel_ki':>10} {'pos_kp':>10} {'pos_ki':>10}")
         gains = arm.get_pos_vel_gains(timeout_ms=timeout_ms)
         for name in arm.joint_names:
@@ -53,28 +82,42 @@ def main() -> None:
         help="Arm YAML config. Can be passed multiple times for left/right arms.",
     )
     parser.add_argument("--timeout-ms", type=int, default=300, help="Per-register read timeout.")
+    parser.add_argument("--port", action="append", default=None, help="Port to read. Can be passed multiple times.")
+    parser.add_argument("--left-port", default="/dev/ttyACM0", help="Default-bi left arm port.")
+    parser.add_argument("--right-port", default="/dev/ttyACM1", help="Default-bi right arm port.")
     parser.add_argument(
         "--default-bi",
         action="store_true",
-        help="Read the generated left/right B601 RT configs from the LeRobot cache.",
+        help="Read B601 registers from --left-port and --right-port without requiring cached yaml.",
     )
     args = parser.parse_args()
 
-    configs = args.config
-    if args.default_bi:
-        missing = [str(path) for path in DEFAULT_BI_CONFIGS if not path.exists()]
-        if missing:
-            raise FileNotFoundError(
-                "Generated bi B601 configs not found: "
-                + ", ".join(missing)
-                + ". Run lerobot-teleoperate-pico4 once or pass --config explicitly."
-            )
-        configs = [str(path) for path in DEFAULT_BI_CONFIGS]
-    if not configs:
-        configs = [None]
+    configs: list[tuple[str | None, str]] = []
+    if args.config:
+        configs.extend((config, config) for config in args.config)
 
-    for config in configs:
-        read_one(config, args.timeout_ms)
+    ports: list[tuple[str, str]] = []
+    if args.default_bi:
+        ports.extend([("left", args.left_port), ("right", args.right_port)])
+    if args.port:
+        ports.extend((f"port{idx}", port) for idx, port in enumerate(args.port, start=1))
+
+    if ports:
+        with tempfile.TemporaryDirectory(prefix="rebotarm-pd-read-") as tmp_dir:
+            tmp_path = Path(tmp_dir)
+            for label, port in ports:
+                config_path = make_b601_config(port, tmp_path / f"{label}.yaml")
+                configs.append((str(config_path), f"{label} {port}"))
+
+            for config, label in configs:
+                read_one(config, label, args.timeout_ms)
+        return
+
+    if not configs:
+        configs = [(None, "package default arm.yaml")]
+
+    for config, label in configs:
+        read_one(config, label, args.timeout_ms)
 
 
 if __name__ == "__main__":

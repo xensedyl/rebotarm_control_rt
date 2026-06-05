@@ -352,6 +352,42 @@ python example/gripper_test.py
 
 ---
 
+#### 12. 达妙 POS_VEL 参数寄存器读取（`0x02_read_damiao_pd.py`）
+
+读取达妙电机当前 POS_VEL 增益寄存器值。这个工具通过 SDK 直接读取电机寄存器；
+`--default-bi` 不依赖 LeRobot 生成的缓存 yaml。
+
+达妙寄存器对应关系：
+
+| 寄存器 | 名称 |
+|---|---|
+| `25` | `vel_kp` / `KP_ASR` |
+| `26` | `vel_ki` / `KI_ASR` |
+| `27` | `pos_kp` / `KP_APR` |
+| `28` | `pos_ki` / `KI_APR` |
+
+**运行**：
+
+```bash
+# 双 B601，默认读取 /dev/ttyACM0 和 /dev/ttyACM1
+python example/0x02_read_damiao_pd.py --default-bi --timeout-ms 300
+
+# 双 B601，显式指定左右端口
+python example/0x02_read_damiao_pd.py \
+  --default-bi \
+  --left-port /dev/ttyACM0 \
+  --right-port /dev/ttyACM1
+
+# 读取一个或多个指定端口
+python example/0x02_read_damiao_pd.py --port /dev/ttyACM0
+python example/0x02_read_damiao_pd.py --port /dev/ttyACM0 --port /dev/ttyACM1
+
+# 通过指定 arm yaml 读取
+python example/0x02_read_damiao_pd.py --config python/rebotarm_control_rt/config/arm.yaml
+```
+
+---
+
 ### MeshCat 仿真
 
 可选仿真示例位于 `example/sim/`。它们只是在可视化层需要 Python `meshcat` 和 Python

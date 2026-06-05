@@ -349,6 +349,43 @@ Interactive gripper terminal for zeroing, mode switching, and MIT/POS_VEL/VEL co
 python example/gripper_test.py
 ```
 
+#### 12. Damiao POS_VEL Gain Register Reader (`0x02_read_damiao_pd.py`)
+
+Reads the current Damiao motor register values for POS_VEL gains. This tool reads registers
+directly from the motors through the SDK; `--default-bi` does not require any LeRobot-generated
+cache yaml.
+
+Damiao registers:
+
+| Register | Name |
+|---|---|
+| `25` | `vel_kp` / `KP_ASR` |
+| `26` | `vel_ki` / `KI_ASR` |
+| `27` | `pos_kp` / `KP_APR` |
+| `28` | `pos_ki` / `KI_APR` |
+
+**Usage**:
+
+```bash
+# Dual B601 arms, defaults to /dev/ttyACM0 and /dev/ttyACM1
+python example/0x02_read_damiao_pd.py --default-bi --timeout-ms 300
+
+# Dual B601 arms with explicit ports
+python example/0x02_read_damiao_pd.py \
+  --default-bi \
+  --left-port /dev/ttyACM0 \
+  --right-port /dev/ttyACM1
+
+# Read one or more arbitrary ports
+python example/0x02_read_damiao_pd.py --port /dev/ttyACM0
+python example/0x02_read_damiao_pd.py --port /dev/ttyACM0 --port /dev/ttyACM1
+
+# Read from an explicit arm yaml
+python example/0x02_read_damiao_pd.py --config python/rebotarm_control_rt/config/arm.yaml
+```
+
+---
+
 **Interactive commands**:
 
 | Command | Description |
