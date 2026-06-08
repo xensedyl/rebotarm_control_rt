@@ -310,7 +310,9 @@ target follows the current pose; otherwise it holds the last locked pose.
 cargo run --manifest-path example/rust/Cargo.toml --bin 10_gravity_compensation_lock -- \
   --port /dev/ttyACM0 \
   --rate 200 \
-  --use_gripper=true
+  --use_gripper=true \
+  --lock-kp 8.0 \
+  --lock-kd 1.0
 ```
 
 Important options:
@@ -318,7 +320,7 @@ Important options:
 | Option | Description |
 |---|---|
 | `--vel-threshold` | Joint velocity threshold in rad/s; default `0.04` |
-| `--lock-kp`, `--lock-kd` | MIT lock stiffness and damping |
+| `--lock-kp`, `--lock-kd` | MIT lock stiffness and damping; defaults are `8.0` and `1.0`. `--kp` / `--kd` are accepted as aliases |
 | `--use_gripper=true/false` | `true` sends gripper MIT hold and uses `end_link` inertial scale `0.7`; `false` skips gripper motor command and removes `end_link` inertial from the gravity model |
 | `--urdf <path>` | Optional URDF path; defaults to the packaged B601 fixed-end URDF |
 

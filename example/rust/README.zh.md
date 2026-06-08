@@ -299,7 +299,9 @@ cargo run --manifest-path example/rust/Cargo.toml --bin 9_gravity_compensation -
 cargo run --manifest-path example/rust/Cargo.toml --bin 10_gravity_compensation_lock -- \
   --port /dev/ttyACM0 \
   --rate 200 \
-  --use_gripper=true
+  --use_gripper=true \
+  --lock-kp 8.0 \
+  --lock-kd 1.0
 ```
 
 重要参数：
@@ -307,7 +309,7 @@ cargo run --manifest-path example/rust/Cargo.toml --bin 10_gravity_compensation_
 | 参数 | 说明 |
 |---|---|
 | `--vel-threshold` | 关节速度阈值，单位 rad/s，默认 `0.04` |
-| `--lock-kp`, `--lock-kd` | MIT 锁止刚度和阻尼 |
+| `--lock-kp`, `--lock-kd` | MIT 锁止刚度和阻尼；默认 `8.0` 和 `1.0`。也支持用 `--kp` / `--kd` 作为别名 |
 | `--use_gripper=true/false` | `true` 给夹爪发送 MIT hold，并使用 `end_link` 惯量缩放 `0.7`；`false` 不给夹爪发指令，并从重力模型中移除 `end_link` 惯量 |
 | `--urdf <path>` | 可选 URDF 路径；默认使用包内 B601 fixed-end URDF |
 

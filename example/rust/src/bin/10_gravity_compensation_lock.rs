@@ -10,21 +10,24 @@ use std::time::Instant;
 fn main() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = env::args().skip(1).collect();
     if has_flag(&args, "--help") || has_flag(&args, "-h") {
-        println!("Usage: cargo run --bin 10_gravity_compensation_lock -- --port /dev/ttyACM0 --rate 200 --use_gripper=true");
+        println!(
+            "Usage: cargo run --bin 10_gravity_compensation_lock -- --port /dev/ttyACM0 --rate 200 --use_gripper=true [--lock-kp 8.0] [--lock-kd 1.0]"
+        );
         return Ok(());
     }
 
     let rate = parse_rate(&args, 200.0);
     let use_gripper = parse_bool_arg(&args, "--use_gripper", true);
     let vel_threshold = parse_float_arg(&args, "--vel-threshold", 0.04) as f32;
-    let lock_kp = parse_float_arg(&args, "--lock-kp", 8.0) as f32;
-    let lock_kd = parse_float_arg(&args, "--lock-kd", 1.0) as f32;
+    let lock_kp = parse_float_arg(&args, "--lock-kp", parse_float_arg(&args, "--kp", 8.0)) as f32;
+    let lock_kd = parse_float_arg(&args, "--lock-kd", parse_float_arg(&args, "--kd", 1.0)) as f32;
     let (urdf_path, _temp_urdf, end_link_scale) = gravity_urdf_for_gripper(&args, use_gripper)?;
     let model = MathModel::load(&urdf_path)?;
     println!("Rust gravity-lock demo backend: C++/Pinocchio librebotarm_math.so.");
     println!(
         "use_gripper={use_gripper}; end_link inertial scale={end_link_scale:.3}; vel-threshold={vel_threshold:.3}"
     );
+    println!("MIT lock gains: kp={lock_kp:.3}, kd={lock_kd:.3}");
     println!("Ctrl+C to stop and disconnect.");
     install_signal_handler();
 
