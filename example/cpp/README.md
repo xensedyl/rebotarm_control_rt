@@ -245,13 +245,17 @@ sends MIT torque feed-forward commands.
 ./example/cpp/build/9_gravity_compensation \
   --port /dev/ttyACM0 \
   --rate 200 \
-  --use_gripper=true
+  --use_gripper=true \
+  --kp 0.0 \
+  --kd 1.0
 ```
 
 Important options:
 
 | Option | Description |
 |---|---|
+| `--kp`, `--kd` | MIT command stiffness and damping for arm joints; defaults are `0.0` and `1.0` for compliant gravity compensation |
+| `--gripper-kp`, `--gripper-kd` | MIT command stiffness and damping for the extra gripper joint; defaults are `0.0` and `1.0` |
 | `--use_gripper=true/false` | `true` sends gripper MIT hold and uses `end_link` inertial scale `0.7`; `false` skips gripper motor command and removes `end_link` inertial from the gravity model |
 | `--urdf <path>` | Optional URDF path; defaults to the packaged B601 fixed-end URDF |
 

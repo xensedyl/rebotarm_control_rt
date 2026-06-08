@@ -240,13 +240,17 @@ q
 ./example/cpp/build/9_gravity_compensation \
   --port /dev/ttyACM0 \
   --rate 200 \
-  --use_gripper=true
+  --use_gripper=true \
+  --kp 0.0 \
+  --kd 1.0
 ```
 
 重要参数：
 
 | 参数 | 说明 |
 |---|---|
+| `--kp`, `--kd` | 机械臂关节 MIT 命令帧刚度和阻尼；默认 `0.0` 和 `1.0`，用于更柔顺的重力补偿 |
+| `--gripper-kp`, `--gripper-kd` | 额外夹爪关节 MIT 命令帧刚度和阻尼；默认 `0.0` 和 `1.0` |
 | `--use_gripper=true/false` | `true` 会给夹爪发送 MIT hold，并使用 `end_link` 惯量缩放 `0.7`；`false` 不控制夹爪，并从重力模型中移除 `end_link` 惯量 |
 | `--urdf <path>` | 可选 URDF 路径，默认使用包内 B601 fixed-end URDF |
 
