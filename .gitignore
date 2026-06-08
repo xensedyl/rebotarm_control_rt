@@ -1,5 +1,6 @@
 /target/
 /example/rust/target/
+/example/cpp/build/
 /dist/
 /cpp/build/
 

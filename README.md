@@ -38,7 +38,8 @@ rebotarm_control_rt/
 │   └── urdf/
 ├── example/
 │   ├── python/                          # Python examples and MeshCat simulations
-│   └── rust/                            # Rust examples using motorbridge + C++ math C ABI
+│   ├── rust/                            # Rust examples using motorbridge + C++ math C ABI
+│   └── cpp/                             # C++ examples using motorbridge C++ + C++ math backend
 ├── tests/
 └── build.sh
 ```
@@ -63,7 +64,8 @@ bash ./setup_env.sh --install
 `build.sh` first compiles `librebotarm_math.so` and `_math.so` with CMake (linking Pinocchio C++)
 into the package directory, then uses maturin to pack `_native` (Rust) + `_math.so` + Python into a
 single wheel and install it. The Rust examples load `librebotarm_math.so` directly through a C ABI
-when they need FK, IK, or gravity compensation.
+when they need FK, IK, or gravity compensation. The C++ examples link the same
+`librebotarm_math.so` directly and use `motorbridge`'s C++ binding for hardware examples.
 
 - **Automatic Pinocchio C++ prefix detection**:
   `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `/usr/local` > `/usr`.
@@ -89,7 +91,7 @@ python -c "import rebotarm_control_rt._math, rebotarm_control_rt._native; print(
 
 The RT loop is **soft real-time in Rust** (`std::thread` + absolute tick cadence + overrun
 counter + best-effort `SCHED_FIFO`). It releases the Python GIL entirely and is far more stable
-than a Python thread — but it is **not** a hard real-time stack like the Flexiv RDK. To get close
+than a Python thread — but it is **not** a hard real-time stack. To get close
 to hard real-time, run as root on a PREEMPT_RT kernel with `rt_priority`/`cpu` set, and monitor
 `arm.rt_send_overruns` / `arm.rt_read_overruns`.
 
@@ -99,10 +101,12 @@ Examples are split by language and documented in their own directories:
 
 - Python examples: [example/python/README.md](example/python/README.md)
 - Rust examples: [example/rust/README.md](example/rust/README.md)
+- C++ examples: [example/cpp/README.md](example/cpp/README.md)
 
 Chinese example documentation is available at
 [example/python/README.zh.md](example/python/README.zh.md) and
-[example/rust/README.zh.md](example/rust/README.zh.md).
+[example/rust/README.zh.md](example/rust/README.zh.md), and
+[example/cpp/README.zh.md](example/cpp/README.zh.md).
 
 Run examples from the repository root after activating the environment. The Python examples add the local `python/` source tree to `sys.path` automatically when run from this repository.
 

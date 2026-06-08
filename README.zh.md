@@ -37,7 +37,8 @@ rebotarm_control_rt/
 │   └── urdf/
 ├── example/
 │   ├── python/                          # Python 示例和 MeshCat 仿真
-│   └── rust/                            # 使用 motorbridge + C++ math C ABI 的 Rust 示例
+│   ├── rust/                            # 使用 motorbridge + C++ math C ABI 的 Rust 示例
+│   └── cpp/                             # 使用 motorbridge C++ + C++ 数学后端的 C++ 示例
 ├── tests/
 └── build.sh
 ```
@@ -61,7 +62,8 @@ bash ./setup_env.sh --install
 
 `build.sh` 先用 CMake 编出 `librebotarm_math.so` 和 `_math.so`（链接 Pinocchio C++）落入包目录，
 再用 maturin 把 `_native`（Rust）+ `_math.so` + Python 打进同一个 wheel 并安装。Rust 示例需要
-FK、IK 或重力补偿时，会通过 C ABI 直接动态加载 `librebotarm_math.so`。
+FK、IK 或重力补偿时，会通过 C ABI 直接动态加载 `librebotarm_math.so`。C++ 示例直接链接同一个
+`librebotarm_math.so`，硬件示例通过 `motorbridge` C++ binding 控制电机。
 
 - **Pinocchio C++ 前缀自动探测**：
   `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `/usr/local` > `/usr`。
@@ -86,7 +88,7 @@ python -c "import rebotarm_control_rt._math, rebotarm_control_rt._native; print(
 ### 实时性说明
 
 RT 循环是 **Rust 软实时**（`std::thread` + 绝对节拍 + overrun 计数 + 尽力 `SCHED_FIFO`）。
-它全程释放 Python GIL，比 Python 线程稳定得多——但**不是** Flexiv RDK 那种硬实时栈。
+它全程释放 Python GIL，比 Python 线程稳定得多——但**不是** 硬实时栈。
 要接近硬实时：在 PREEMPT_RT 内核上以 root 运行并设 `rt_priority`/`cpu`，
 并监控 `arm.rt_send_overruns` / `arm.rt_read_overruns`。
 
@@ -96,9 +98,10 @@ RT 循环是 **Rust 软实时**（`std::thread` + 绝对节拍 + overrun 计数 
 
 - Python 示例：[example/python/README.zh.md](example/python/README.zh.md)
 - Rust 示例：[example/rust/README.zh.md](example/rust/README.zh.md)
+- C++ 示例：[example/cpp/README.zh.md](example/cpp/README.zh.md)
 
 英文示例文档见 [example/python/README.md](example/python/README.md) 和
-[example/rust/README.md](example/rust/README.md)。
+[example/rust/README.md](example/rust/README.md)、[example/cpp/README.md](example/cpp/README.md)。
 
 激活环境后，从仓库根目录运行示例。Python 示例从仓库根目录运行时会自动把本地 `python/` 源码树加入 `sys.path`。
 
