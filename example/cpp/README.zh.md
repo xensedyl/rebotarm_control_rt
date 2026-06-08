@@ -263,7 +263,9 @@ q
 ./example/cpp/build/10_gravity_compensation_lock \
   --port /dev/ttyACM0 \
   --rate 200 \
-  --use_gripper=true
+  --use_gripper=true \
+  --lock-kp 8.0 \
+  --lock-kd 1.0
 ```
 
 重要参数：
@@ -271,7 +273,7 @@ q
 | 参数 | 说明 |
 |---|---|
 | `--vel-threshold` | 关节速度阈值，单位 rad/s |
-| `--lock-kp`, `--lock-kd` | MIT 锁定刚度和阻尼 |
+| `--lock-kp`, `--lock-kd` | MIT 锁定刚度和阻尼；默认 `8.0` 和 `1.0`。也支持用 `--kp` / `--kd` 作为别名 |
 | `--use_gripper=true/false` | 是否包含固定 `end_link` 夹爪负载，默认 `true` |
 
 ## 夹爪控制台

@@ -269,7 +269,9 @@ the locked pose.
 ./example/cpp/build/10_gravity_compensation_lock \
   --port /dev/ttyACM0 \
   --rate 200 \
-  --use_gripper=true
+  --use_gripper=true \
+  --lock-kp 8.0 \
+  --lock-kd 1.0
 ```
 
 Important options:
@@ -277,7 +279,7 @@ Important options:
 | Option | Description |
 |---|---|
 | `--vel-threshold` | Joint velocity threshold in rad/s |
-| `--lock-kp`, `--lock-kd` | MIT lock stiffness and damping |
+| `--lock-kp`, `--lock-kd` | MIT lock stiffness and damping; defaults are `8.0` and `1.0`. `--kp` / `--kd` are accepted as aliases |
 | `--use_gripper=true/false` | Include or exclude the fixed `end_link` gripper load; default is `true` |
 
 ## Gripper Console
