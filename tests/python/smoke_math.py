@@ -1,13 +1,9 @@
 """冒烟：C++ _math 加载 URDF、FK at neutral、关节名。验证 Pinocchio C++ 链路。"""
-from pathlib import Path
 import numpy as np
 from rebotarm_control_rt import _math
+from rebotarm_control_rt.kinematics import _URDF
 
-URDF = (
-    Path(_math.__file__).parent
-    / "urdf" / "reBot-DevArm_fixend_description" / "urdf" / "reBot-DevArm_fixend.urdf"
-)
-rm = _math.RobotModel(str(URDF))
+rm = _math.RobotModel(_URDF)
 print("nq =", rm.nq())
 print("joints =", rm.joint_names())
 q = rm.neutral()

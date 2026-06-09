@@ -1,15 +1,13 @@
 """C++ 动力学层测试：物理自洽性（结果即 Pinocchio，故等价验证绑定正确）。"""
-from pathlib import Path
 import numpy as np
 import pytest
 
 m = pytest.importorskip("rebotarm_control_rt._math")
+from rebotarm_control_rt.kinematics import _URDF
 
 
 def _rm():
-    urdf = str(Path(m.__file__).parent / "urdf" / "reBot-DevArm_fixend_description"
-               / "urdf" / "reBot-DevArm_fixend.urdf")
-    return m.RobotModel(urdf)
+    return m.RobotModel(_URDF)
 
 
 def test_mass_matrix_spd():

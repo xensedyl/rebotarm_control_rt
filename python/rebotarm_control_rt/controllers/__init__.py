@@ -2,14 +2,10 @@
 
 Python 仅注入默认 URDF 路径后转交 C++ 实现。
 """
-from pathlib import Path
-
 from rebotarm_control_rt._math import ArmEndPos as _ArmEndPos, TrajProfile
+from rebotarm_control_rt.paths import default_urdf_path
 
-_URDF = str(
-    Path(__file__).resolve().parent.parent
-    / "urdf" / "reBot-DevArm_fixend_description" / "urdf" / "reBot-DevArm_fixend.urdf"
-)
+_URDF = str(default_urdf_path())
 
 
 class ArmEndPos(_ArmEndPos):

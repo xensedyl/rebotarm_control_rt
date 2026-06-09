@@ -33,8 +33,9 @@ rebotarm_control_rt/
 │   ├── dynamics/
 │   ├── trajectory/
 │   ├── controllers/
-│   ├── config/                           #   随包安装
-│   └── urdf/
+│   └── config/                           #   随包安装
+├── urdf/                                 # 项目级机器人描述资源
+├── calibration/                          # 本地生成的标定结果
 ├── example/
 │   ├── python/                          # Python 示例和 MeshCat 仿真
 │   ├── rust/                            # 使用 motorbridge + C++ math C ABI 的 Rust 示例

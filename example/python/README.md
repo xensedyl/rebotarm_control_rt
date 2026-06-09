@@ -315,6 +315,59 @@ Interactive commands:
 | `s` | Print gripper position, velocity, and torque |
 | `q` | Stop loop, disable, and disconnect |
 
+## Tool TCP Calibration
+
+`tool_calibration.py` calibrates a newly mounted gripper/tool TCP relative to the flange frame
+(`link6` by default). It runs gravity-compensated free-drive and captures at least four fixed-point
+touch poses. By default it calibrates TCP translation only and keeps the existing URDF `end_joint`
+orientation.
+
+```bash
+python example/python/tool_calibration.py \
+  --port /dev/ttyACM0 \
+  --samples 4 \
+  --kd 2.0 \
+  --gravity-scale 1.0
+```
+
+Output includes:
+
+- `calibration/tool_calibration.yaml`: numeric calibration result
+- `calibration/tool_calibration.urdf`: a copy of the input URDF with only `end_joint` origin updated
+- `xyz_m` / `xyz_mm`: TCP translation in the flange frame
+- `rpy_deg`: TCP orientation in the flange frame
+- `T_flange_tool`: full 4x4 transform
+- `residual_mm`: 4-point calibration residuals
+
+After the files are saved, the script keeps the gravity-compensated free-drive loop running so the
+arm does not suddenly lose support. Press `Ctrl+C` when you are ready to stop; the script will then
+stop the loop, disable the motors, disconnect, and exit.
+
+Use the generated URDF when loading the model:
+
+```python
+from rebotarm_control_rt.kinematics import load_robot_model
+
+default_model = load_robot_model()                  # original reBot-DevArm_fixend.urdf
+tool_model = load_robot_model("tool_calibration.urdf")
+```
+
+This keeps the original URDF unchanged. Passing only `tool_calibration.urdf` makes
+`load_robot_model` look for that file under the project/local `calibration/` directory, so
+`end_link` becomes the calibrated TCP for that model.
+
+If you also need to calibrate the tool orientation, add `--calibrate-orientation`. After the 4-point
+translation step, the script will ask for a +Z direction pose and a +X direction pose. These two
+directions must be different; if they are nearly the same, orientation cannot be solved and the
+script falls back to the position-only result.
+
+Free-drive tuning:
+
+| Option | Description |
+|---|---|
+| `--gravity-scale` | Multiplier for gravity feed-forward torque, `tau = gravity_scale * g(q)`. Start from `1.0`; increase slightly if the arm sinks, decrease slightly if it floats upward. Use small steps such as `0.02` to `0.05`. |
+| `--kd` | MIT damping during free-drive. Larger values feel more damped and less loose; smaller values feel lighter but may oscillate. |
+
 ## MeshCat Simulation
 
 Optional simulation examples live under `example/python/sim/`. They require Python `meshcat` and

@@ -95,7 +95,7 @@ inline std::string repo_root() {
 
 inline std::string default_urdf_path() {
   return repo_root() +
-         "/python/rebotarm_control_rt/urdf/reBot-DevArm_fixend_description/urdf/"
+         "/urdf/reBot-DevArm_fixend_description/urdf/"
          "reBot-DevArm_fixend.urdf";
 }
 

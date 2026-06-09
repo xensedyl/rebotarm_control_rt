@@ -298,6 +298,56 @@ python example/python/gripper_test.py --port /dev/ttyACM0
 | `s` | 打印夹爪位置、速度、力矩 |
 | `q` | 停止循环、失能并断开 |
 
+## 工具 TCP 标定
+
+`tool_calibration.py` 用于标定新夹爪/工具相对法兰的 TCP 位姿，默认法兰 frame 为
+`link6`。脚本会开启重力补偿自由拖动，采集至少 4 个固定点触碰姿态。默认只标定 TCP
+平移，并沿用原 URDF 里 `end_joint` 的姿态。
+
+```bash
+python example/python/tool_calibration.py \
+  --port /dev/ttyACM0 \
+  --samples 4 \
+  --kd 0.5 \
+  --gravity-scale 1.0
+```
+
+输出内容：
+
+- `calibration/tool_calibration.yaml`：数值标定结果
+- `calibration/tool_calibration.urdf`：输入 URDF 的副本，只更新 `end_joint origin`
+- `xyz_m` / `xyz_mm`：TCP 在法兰系下的平移
+- `rpy_deg`：TCP 在法兰系下的姿态
+- `T_flange_tool`：完整 4x4 变换
+- `residual_mm`：4 点法残差
+
+文件保存完成后，脚本会继续保持重力补偿自由拖动循环，不会马上下使能，避免机械臂突然失去支撑。
+准备退出时按 `Ctrl+C`，脚本会停止控制循环、下使能、断开并退出。
+
+使用生成的 URDF 加载模型：
+
+```python
+from rebotarm_control_rt.kinematics import load_robot_model
+
+default_model = load_robot_model()                  # 原始 reBot-DevArm_fixend.urdf
+tool_model = load_robot_model("tool_calibration.urdf")
+```
+
+这样原始 URDF 不会被修改。只传 `tool_calibration.urdf` 文件名时，`load_robot_model`
+会自动到项目/本地 `calibration/` 目录下找同名文件，因此这个模型里的 `end_link`
+会变成标定后的 TCP。
+
+如果还需要标定工具姿态，额外加 `--calibrate-orientation`。四点平移标定后，脚本会要求
+采集 +Z 和 +X 两个方向姿态。这两个方向必须不同；如果 +X 和 +Z 几乎一样，姿态无法求解，
+脚本会退回保存只包含平移的结果。
+
+自由拖动调参：
+
+| 参数 | 说明 |
+|---|---|
+| `--gravity-scale` | 重力前馈力矩倍率，`tau = gravity_scale * g(q)`。先从 `1.0` 开始；如果机械臂往下沉，略微增大；如果自己往上飘，略微减小。建议每次按 `0.02` 到 `0.05` 小步调整。 |
+| `--kd` | 自由拖动时 MIT 阻尼。值越大越稳、越不松；值越小越轻，但可能更容易抖。 |
+
 ## MeshCat 仿真
 
 可选仿真示例位于 `example/python/sim/`。它们只是在可视化层需要 Python `meshcat` 和 Python `pinocchio`；运动学和轨迹计算仍然走本包的 C++ 绑定。

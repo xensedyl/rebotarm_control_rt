@@ -34,8 +34,9 @@ rebotarm_control_rt/
 │   ├── dynamics/
 │   ├── trajectory/
 │   ├── controllers/
-│   ├── config/                           #   installed with the package
-│   └── urdf/
+│   └── config/                           #   installed with the package
+├── urdf/                                 # Project-level robot description assets
+├── calibration/                          # Local generated calibration outputs
 ├── example/
 │   ├── python/                          # Python examples and MeshCat simulations
 │   ├── rust/                            # Rust examples using motorbridge + C++ math C ABI

@@ -27,3 +27,7 @@ dependencies = [
 python-source = "python"
 module-name = "rebotarm_control_rt._native"
 features = ["pyo3/extension-module"]
+include = [
+    { path = "urdf/**", format = "sdist" },
+    { path = "urdf/**", format = "wheel" },
+]

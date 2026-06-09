@@ -1,15 +1,13 @@
 """C++ 轨迹层测试：测地线端点、CLIK 跟踪自洽、统计。"""
-from pathlib import Path
 import numpy as np
 import pytest
 
 m = pytest.importorskip("rebotarm_control_rt._math")
+from rebotarm_control_rt.kinematics import _URDF
 
 
 def _rm():
-    urdf = str(Path(m.__file__).parent / "urdf" / "reBot-DevArm_fixend_description"
-               / "urdf" / "reBot-DevArm_fixend.urdf")
-    return m.RobotModel(urdf)
+    return m.RobotModel(_URDF)
 
 
 def test_geodesic_endpoints():
