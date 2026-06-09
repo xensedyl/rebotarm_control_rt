@@ -30,6 +30,7 @@ from rebotarm_control_rt.dynamics import (
     load_dynamics_model,
 )
 from rebotarm_control_rt.kinematics import _URDF, load_robot_model
+from _example_config import add_port_argument, config_with_port
 
 
 _running = True
@@ -136,6 +137,7 @@ def _release_mit_torque_hold(arm, frames: int = 10, dt_s: float = 0.02) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    add_port_argument(parser)
     parser.add_argument("--rate", type=float, default=200.0, help="Python control rate in Hz.")
     parser.add_argument("--vel-threshold", type=float, default=0.04, help="Linear velocity threshold.")
     parser.add_argument("--w-threshold", type=float, default=0.08, help="Angular velocity threshold.")
@@ -172,7 +174,7 @@ def main() -> None:
     print("Ctrl+C to stop and disconnect.")
     print("-" * 65)
 
-    arm = RobotArm(args.config)
+    arm = RobotArm(config_with_port(args.config, args.port))
     connected = False
     q_target: np.ndarray | None = None
     integral: np.ndarray | None = None

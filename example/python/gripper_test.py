@@ -12,6 +12,7 @@ if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
 
 from rebotarm_control_rt.actuator import Gripper
+from _example_config import add_port_argument, config_with_port
 
 HELP = """
 Gripper commands
@@ -122,9 +123,10 @@ class GripperTerminal:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to gripper YAML config.")
+    add_port_argument(parser)
     parser.add_argument("--rate", type=float, default=100.0, help="Python gripper loop rate.")
     args = parser.parse_args()
-    GripperTerminal(args.config, args.rate).run()
+    GripperTerminal(config_with_port(args.config, args.port, gripper=True), args.rate).run()
 
 
 if __name__ == "__main__":

@@ -15,19 +15,26 @@ automatically, so they can be used before installing a wheel.
 
 ## Hardware Setup
 
-All hardware examples accept `--config/-c` to load a different arm or gripper YAML.
+All hardware examples accept `--port` to override the YAML `channel` at runtime, and
+`--config/-c` to load a different arm or gripper YAML.
 
-For the Damiao serial bridge, first check the actual USB device name and then update the packaged
-YAML if needed:
+For the Damiao serial bridge, first check the actual USB device name and pass it with `--port`:
 
 ```bash
 ls -l /dev/ttyACM* /dev/ttyUSB*
 ls -l /dev/serial/by-id/
 
-# Then update python/rebotarm_control_rt/config/arm.yaml and gripper.yaml:
-#   channel: /dev/ttyACM0    # or /dev/ttyACM1, /dev/ttyACM2, ...
 sudo chmod 666 /dev/ttyACM*
+
+# Single arm example:
+#   --port /dev/ttyACM0
+#
+# Dual arms usually use different ports, for example:
+#   left:  --port /dev/ttyACM0
+#   right: --port /dev/ttyACM1
 ```
+
+If you want the packaged YAML defaults to work without `--port`, update `python/rebotarm_control_rt/config/arm.yaml` and `gripper.yaml` manually: `channel: /dev/ttyACM0`.
 
 For SocketCAN:
 
@@ -44,8 +51,8 @@ one selected joint, and keeps the other joints at their current positions. `1_da
 kept as a filename-compatible entry point for workflows copied from `reBotArm_control_py`.
 
 ```bash
-python example/python/0x01damiao_test.py --joint 0
-python example/python/1_damiao_text.py --joint joint1
+python example/python/0x01damiao_test.py --port /dev/ttyACM0 --joint 0
+python example/python/1_damiao_text.py --port /dev/ttyACM0 --joint joint1
 ```
 
 Interactive commands:
@@ -67,8 +74,8 @@ Interactive commands:
 confirmation and then sets the current arm pose as zero.
 
 ```bash
-python example/python/2_zero_and_read.py --skip-zero
-python example/python/2_zero_and_read.py
+python example/python/2_zero_and_read.py --port /dev/ttyACM0 --skip-zero
+python example/python/2_zero_and_read.py --port /dev/ttyACM0
 ```
 
 ### 3. Damiao POS_VEL Gain Register Reader
@@ -114,7 +121,7 @@ python example/python/0x02_read_damiao_pd.py --config python/rebotarm_control_rt
 `set_targets`; the Rust thread sends motor frames at the configured rate.
 
 ```bash
-python example/python/3_mit_control.py --rate 150
+python example/python/3_mit_control.py --port /dev/ttyACM0 --rate 150
 ```
 
 Input format:
@@ -131,7 +138,7 @@ q                             # quit
 overrides `vlim` for all joints in that command.
 
 ```bash
-python example/python/4_pos_vel_control.py --rate 150
+python example/python/4_pos_vel_control.py --port /dev/ttyACM0 --rate 150
 ```
 
 Input format:
@@ -197,7 +204,7 @@ Example input:
 joint targets.
 
 ```bash
-python example/python/7_arm_ik_control.py
+python example/python/7_arm_ik_control.py --port /dev/ttyACM0
 ```
 
 Example input:
@@ -222,7 +229,7 @@ Interactive commands:
 trajectory, then the Rust RT loop executes the streamed joint targets.
 
 ```bash
-python example/python/8_arm_traj_control.py
+python example/python/8_arm_traj_control.py --port /dev/ttyACM0
 ```
 
 Input format:
@@ -248,7 +255,7 @@ Example input:
 sends MIT commands from a Python callback loop.
 
 ```bash
-python example/python/9_gravity_compensation.py --rate 200
+python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200
 ```
 
 Control law:
@@ -264,7 +271,7 @@ model with the calibrated load scale used for the tested B601 gripper setup. If 
 without the gripper or equivalent end load, disable it explicitly:
 
 ```bash
-python example/python/9_gravity_compensation.py --rate 200 --use_gripper=false
+python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200 --use_gripper=false
 ```
 
 Press `Ctrl+C` to stop and disconnect.
@@ -276,7 +283,7 @@ compensation. When the TCP velocity is below thresholds, the locked joint target
 pushing the arm fast enough updates the locked pose.
 
 ```bash
-python example/python/10_gravity_compensation_lock.py --rate 200
+python example/python/10_gravity_compensation_lock.py --port /dev/ttyACM0 --rate 200
 ```
 
 Important options:
@@ -295,7 +302,7 @@ Important options:
 MIT/POS_VEL/VEL commands.
 
 ```bash
-python example/python/gripper_test.py
+python example/python/gripper_test.py --port /dev/ttyACM0
 ```
 
 Interactive commands:

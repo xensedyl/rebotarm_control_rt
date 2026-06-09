@@ -17,6 +17,7 @@ if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
 
 from rebotarm_control_rt.actuator import RobotArm
+from _example_config import add_port_argument, config_with_port
 
 
 def print_state(arm) -> None:
@@ -30,13 +31,14 @@ def print_state(arm) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    add_port_argument(parser)
     parser.add_argument("--rate", type=float, default=None, help="RT loop rate in Hz. Defaults to YAML rate.")
     parser.add_argument("--rt-priority", type=int, default=0, help="Best-effort SCHED_FIFO priority.")
     parser.add_argument("--cpu", type=int, default=None, help="Optional CPU affinity.")
     parser.add_argument("--request-feedback", action="store_true", help="Request feedback from RT loop.")
     args = parser.parse_args()
 
-    arm = RobotArm(args.config)
+    arm = RobotArm(config_with_port(args.config, args.port))
     try:
         arm.connect()
         print("--- connected ---")

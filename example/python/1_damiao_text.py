@@ -18,6 +18,7 @@ if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
 
 from rebotarm_control_rt.actuator import RobotArm
+from _example_config import add_port_argument, config_with_port
 
 
 def joint_index(names: list[str], joint: str) -> int:
@@ -35,6 +36,7 @@ def joint_index(names: list[str], joint: str) -> int:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    add_port_argument(parser)
     parser.add_argument("--joint", default="0", help="Joint index or name to control. Default: 0.")
     parser.add_argument("--rate", type=float, default=150.0, help="RT loop rate for target-cache modes.")
     parser.add_argument("--rt-priority", type=int, default=0, help="Best-effort SCHED_FIFO priority.")
@@ -42,7 +44,7 @@ def main() -> None:
     parser.add_argument("--request-feedback", action="store_true", help="Request feedback from RT loop.")
     args = parser.parse_args()
 
-    arm = RobotArm(args.config)
+    arm = RobotArm(config_with_port(args.config, args.port))
     try:
         arm.connect()
         names = list(arm.joint_names)

@@ -5,7 +5,7 @@ This example keeps Python callback control because each cycle computes a
 dynamics feed-forward torque from the current joint state.
 
 Use on hardware only:
-    python example/python/9_gravity_compensation.py [--config arm.yaml] [--rate 200]
+    python example/python/9_gravity_compensation.py --port /dev/ttyACM0 [--config arm.yaml] [--rate 200]
 
 Ctrl+C stops the control loop and disconnects.
 """
@@ -33,6 +33,7 @@ from rebotarm_control_rt.dynamics import (
     load_dynamics_model,
 )
 from rebotarm_control_rt.kinematics import _URDF
+from _example_config import add_port_argument, config_with_port
 
 
 _running = True
@@ -168,6 +169,7 @@ def make_gravity_compensation_controller(model, args) -> Callable:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    add_port_argument(parser)
     parser.add_argument("--rate", type=float, default=None, help="Python callback loop rate in Hz.")
     parser.add_argument("--kp", type=float, default=2.0, help="MIT mode stiffness written before loop start.")
     parser.add_argument("--kd", type=float, default=1.0, help="MIT mode damping written before loop start.")
@@ -198,7 +200,7 @@ def main() -> None:
     print("Ctrl+C to stop and disconnect.")
     print("-" * 60)
 
-    arm = RobotArm(args.config)
+    arm = RobotArm(config_with_port(args.config, args.port))
     rate = args.rate
     connected = False
     try:

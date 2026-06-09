@@ -2,7 +2,7 @@
 """ArmEndPos 交互控制示例（轨迹规划模式）。
 
 用法:
-    python example/python/8_arm_traj_control.py [--config arm.yaml]
+    python example/python/8_arm_traj_control.py --port /dev/ttyACM0 [--config arm.yaml]
 
 输入:
     x y z [roll pitch yaw] [duration]   目标末端位置（米 / 弧度 / 秒）
@@ -24,14 +24,16 @@ if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
 from rebotarm_control_rt.actuator import RobotArm
 from rebotarm_control_rt.controllers import ArmEndPos
 from rebotarm_control_rt.kinematics import joint_to_pose, load_robot_model
+from _example_config import add_port_argument, config_with_port
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    add_port_argument(parser)
     args = parser.parse_args()
 
-    arm = RobotArm(args.config)
+    arm = RobotArm(config_with_port(args.config, args.port))
     arm_endpos_control = ArmEndPos(arm)
     model = load_robot_model()
 

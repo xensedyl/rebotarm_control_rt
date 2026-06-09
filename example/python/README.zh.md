@@ -13,18 +13,28 @@ conda activate rebot
 
 ## 硬件准备
 
-所有真机示例都支持 `--config/-c` 指定其他 arm/gripper YAML。
+所有真机示例都支持 `--port` 在运行时覆盖 YAML 里的 `channel`，也支持
+`--config/-c` 指定其他 arm/gripper YAML。
 
-达妙串口桥运行前先确认实际端口，再按需修改随包配置：
+达妙串口桥运行前先确认实际端口，然后在命令里传 `--port`：
 
 ```bash
 ls -l /dev/ttyACM* /dev/ttyUSB*
 ls -l /dev/serial/by-id/
 
-# 然后修改 python/rebotarm_control_rt/config/arm.yaml 和 gripper.yaml:
-#   channel: /dev/ttyACM0    # 或 /dev/ttyACM1、/dev/ttyACM2 等
 sudo chmod 666 /dev/ttyACM*
+
+# 单臂示例：
+#   --port /dev/ttyACM0
+#
+# 双臂通常使用不同端口，例如：
+#   left:  --port /dev/ttyACM0
+#   right: --port /dev/ttyACM1
 ```
+
+如果希望不传 `--port` 也能用随包默认配置，再手动修改
+`python/rebotarm_control_rt/config/arm.yaml` 和 `gripper.yaml`：
+`channel: /dev/ttyACM0`。
 
 SocketCAN 使用前：
 
@@ -40,8 +50,8 @@ sudo ip link set can0 up type can bitrate 500000
 `1_damiao_text.py` 保留为与 `reBotArm_control_py` 同名的兼容入口。
 
 ```bash
-python example/python/0x01damiao_test.py --joint 0
-python example/python/1_damiao_text.py --joint joint1
+python example/python/0x01damiao_test.py --port /dev/ttyACM0 --joint 0
+python example/python/1_damiao_text.py --port /dev/ttyACM0 --joint joint1
 ```
 
 交互命令：
@@ -62,8 +72,8 @@ python example/python/1_damiao_text.py --joint joint1
 `2_zero_and_read.py` 打印实时关节位置。若不加 `--skip-zero`，脚本会先要求确认，然后把当前姿态设为零点。
 
 ```bash
-python example/python/2_zero_and_read.py --skip-zero
-python example/python/2_zero_and_read.py
+python example/python/2_zero_and_read.py --port /dev/ttyACM0 --skip-zero
+python example/python/2_zero_and_read.py --port /dev/ttyACM0
 ```
 
 ### 3. 达妙 POS_VEL 参数寄存器读取
@@ -106,7 +116,7 @@ python example/python/0x02_read_damiao_pd.py --config python/rebotarm_control_rt
 `3_mit_control.py` 以 MIT 模式启动 Rust RT 循环。Python 只通过 `set_targets` 更新目标缓存，Rust 线程按设定频率下发电机帧。
 
 ```bash
-python example/python/3_mit_control.py --rate 150
+python example/python/3_mit_control.py --port /dev/ttyACM0 --rate 150
 ```
 
 输入格式：
@@ -122,7 +132,7 @@ q                             # 退出
 `4_pos_vel_control.py` 以 POS_VEL 模式启动 Rust RT 循环。输入末尾可附加 `vlim`，用于覆盖本次命令的所有关节速度上限。
 
 ```bash
-python example/python/4_pos_vel_control.py --rate 150
+python example/python/4_pos_vel_control.py --port /dev/ttyACM0 --rate 150
 ```
 
 输入格式：
@@ -185,7 +195,7 @@ x y z roll pitch yaw          # 米 + 度
 `7_arm_ik_control.py` 使用 `ArmEndPos`：C++ 求解 IK，Rust RT 循环执行求解出的关节目标。
 
 ```bash
-python example/python/7_arm_ik_control.py
+python example/python/7_arm_ik_control.py --port /dev/ttyACM0
 ```
 
 示例输入：
@@ -209,7 +219,7 @@ python example/python/7_arm_ik_control.py
 `8_arm_traj_control.py` 使用 `ArmEndPos` 轨迹模式。C++ 规划并跟踪笛卡尔轨迹，Rust RT 循环执行流式关节目标。
 
 ```bash
-python example/python/8_arm_traj_control.py
+python example/python/8_arm_traj_control.py --port /dev/ttyACM0
 ```
 
 输入格式：
@@ -233,7 +243,7 @@ x y z [roll pitch yaw] [duration]
 `9_gravity_compensation.py` 使用 C++ dynamics 模型计算重力前馈力矩，并通过 Python 回调循环发送 MIT 指令。
 
 ```bash
-python example/python/9_gravity_compensation.py --rate 200
+python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200
 ```
 
 控制律：
@@ -247,7 +257,7 @@ pos = 当前关节位置
 默认 `use_gripper=true`：动力学模型会把 URDF 中固定在末端的 `end_link` 负载计入重力补偿，并使用当前 B601 夹爪配置下标定过的负载缩放。若机械臂未安装夹爪或等效末端负载，显式关闭：
 
 ```bash
-python example/python/9_gravity_compensation.py --rate 200 --use_gripper=false
+python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200 --use_gripper=false
 ```
 
 按 `Ctrl+C` 停止并断开。
@@ -257,7 +267,7 @@ python example/python/9_gravity_compensation.py --rate 200 --use_gripper=false
 `10_gravity_compensation_lock.py` 在重力补偿基础上加入末端速度锁止。TCP 速度低于阈值时锁定关节目标；用力推动超过阈值后更新锁定姿态。
 
 ```bash
-python example/python/10_gravity_compensation_lock.py --rate 200
+python example/python/10_gravity_compensation_lock.py --port /dev/ttyACM0 --rate 200
 ```
 
 常用参数：
@@ -275,7 +285,7 @@ python example/python/10_gravity_compensation_lock.py --rate 200
 `gripper_test.py` 是夹爪交互终端，用于设零、切换模式、发送 MIT/POS_VEL/VEL 指令。
 
 ```bash
-python example/python/gripper_test.py
+python example/python/gripper_test.py --port /dev/ttyACM0
 ```
 
 交互命令：
