@@ -51,6 +51,17 @@ def default_calibration_dir() -> Path:
     root = repo_root()
     if (root / "pyproject.toml").exists():
         return root / "calibration"
+
+    cwd = Path.cwd().resolve()
+    for parent in [cwd, *cwd.parents]:
+        candidates = [
+            parent / "rebotarm_control_rt" / "calibration",
+            parent / "rebot_lerobot" / "rebotarm_control_rt" / "calibration",
+        ]
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
     return Path.cwd() / "calibration"
 
 
@@ -58,20 +69,24 @@ def resolve_urdf_path(urdf_path: str | Path | None = None) -> Path:
     """Resolve a URDF argument.
 
     ``None`` returns the original project URDF. Explicit existing paths are
-    honored as-is. A bare filename such as ``tool_calibration.urdf`` is resolved
-    from the project/local ``calibration/`` directory when it is not present in
-    the current working directory.
+    honored as-is. If the given path does not exist, the SDK-level
+    ``calibration/`` directory is searched by filename. For example, both
+    ``tool_calibration.urdf`` and ``some/package/tool_calibration.urdf`` resolve
+    to ``calibration/tool_calibration.urdf`` when that file exists.
     """
     if urdf_path is None:
         return default_urdf_path()
 
     path = Path(urdf_path).expanduser()
-    if path.exists() or path.is_absolute():
+    if path.is_absolute():
         return path
 
-    calibration_path = default_calibration_dir() / path
+    calibration_path = default_calibration_dir() / path.name
     if calibration_path.exists():
         return calibration_path
+
+    if path.exists():
+        return path
 
     return path
 
