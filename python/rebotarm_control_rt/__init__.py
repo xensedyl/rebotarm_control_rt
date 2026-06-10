@@ -6,6 +6,10 @@
 
 接口与 reBotArm_control_py 对齐，可直接替换。
 """
+from ._runtime import ensure_compatible_libstdcpp
+
+ensure_compatible_libstdcpp()
+
 from . import actuator
 from . import kinematics
 from . import dynamics

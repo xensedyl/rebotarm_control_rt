@@ -7,11 +7,32 @@
   - RobotArm/Gripper 暴露与 reBotArm_control_py 一致的方法名
 """
 import importlib
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 PKG = "rebotarm_control_rt"
+
+
+def test_import_after_system_libstdcpp():
+    """An older system libstdc++ must not break the C++ math module import."""
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            (
+                "import ctypes, pathlib; "
+                "lib = pathlib.Path('/lib/x86_64-linux-gnu/libstdc++.so.6'); "
+                "lib.exists() and ctypes.CDLL(str(lib), mode=ctypes.RTLD_GLOBAL); "
+                "import rebotarm_control_rt"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_import_all_subpackages():
