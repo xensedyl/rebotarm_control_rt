@@ -333,6 +333,20 @@ cargo run --manifest-path example/rust/Cargo.toml --bin gripper_test -- --port /
 | `state` | 打印机械臂和夹爪状态 |
 | `q` | 停止并断开 |
 
+## 离线动力学参数辨识
+
+`13_identify_dynamics.rs` 从 CSV 数据中读取 `q/dq/ddq/tau`，并通过 C ABI 调用同一个
+C++/Pinocchio 动力学辨识后端。
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 13_identify_dynamics -- \
+  --data calibration/id_data_train.csv \
+  --mode full
+```
+
+使用 `--mode base` 可以辨识 QR 选择的独立最小参数集。Rust 示例会打印拟合误差和所选列号；
+如果需要 YAML 输出或生成写入惯量的新 URDF，请使用 Python 示例。
+
 ## 构建检查
 
 如果依赖已经在本机缓存，可以用离线模式检查：

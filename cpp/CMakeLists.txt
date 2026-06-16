@@ -64,6 +64,7 @@ find_library(TINYXML2_LIB NAMES tinyxml2
 set(REBOTARM_MATH_CORE_SOURCES
   src/robot_model.cpp
   src/dynamics.cpp
+  src/identification.cpp
   src/trajectory.cpp
   src/math_c_api.cpp
 )

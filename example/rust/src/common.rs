@@ -1004,6 +1004,78 @@ type IkFn = unsafe extern "C" fn(
 ) -> c_int;
 type GravityFn =
     unsafe extern "C" fn(*const c_void, *const c_double, c_int, *mut c_double, c_int) -> c_int;
+type NumTotalParamsFn = unsafe extern "C" fn(*const c_void, c_int) -> c_int;
+type BuildRegressionFn = unsafe extern "C" fn(
+    *const c_void,
+    *const c_double,
+    *const c_double,
+    *const c_double,
+    c_int,
+    c_int,
+    c_int,
+    c_double,
+    *mut c_double,
+    c_int,
+    c_int,
+) -> c_int;
+type StackTauFn =
+    unsafe extern "C" fn(*const c_double, c_int, c_int, *mut c_double, c_int) -> c_int;
+
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct CLsInfo {
+    pub rank: c_int,
+    pub condition: c_double,
+    pub residual_norm: c_double,
+}
+
+#[repr(C)]
+#[derive(Default, Clone, Copy)]
+pub struct CMetrics {
+    pub rmse: c_double,
+    pub mae: c_double,
+    pub max_abs: c_double,
+    pub r2: c_double,
+}
+
+type FitLeastSquaresFn = unsafe extern "C" fn(
+    *const c_double,
+    c_int,
+    c_int,
+    *const c_double,
+    c_int,
+    c_double,
+    *mut c_double,
+    c_int,
+    *mut c_double,
+    c_int,
+    *mut CLsInfo,
+) -> c_int;
+type FitBaseQrFn = unsafe extern "C" fn(
+    *const c_double,
+    c_int,
+    c_int,
+    *const c_double,
+    c_int,
+    c_double,
+    *mut c_double,
+    c_int,
+    *mut c_int,
+    c_int,
+    *mut c_double,
+    c_int,
+    *mut CLsInfo,
+) -> c_int;
+type RegressionMetricsFn = unsafe extern "C" fn(
+    *const c_double,
+    *const c_double,
+    c_int,
+    c_int,
+    *mut CMetrics,
+    *mut c_double,
+    *mut c_double,
+    c_int,
+) -> c_int;
 type LastErrorFn = unsafe extern "C" fn() -> *const c_char;
 
 #[repr(C)]
@@ -1024,6 +1096,12 @@ struct MathApi {
     fk: FkFn,
     ik: IkFn,
     gravity: GravityFn,
+    num_total_params: NumTotalParamsFn,
+    build_regression: BuildRegressionFn,
+    stack_tau: StackTauFn,
+    fit_ls: FitLeastSquaresFn,
+    fit_base_qr: FitBaseQrFn,
+    regression_metrics: RegressionMetricsFn,
     last_error: LastErrorFn,
 }
 
@@ -1040,6 +1118,15 @@ impl MathApi {
             let fk = *lib.get::<FkFn>(b"rebotarm_math_fk\0")?;
             let ik = *lib.get::<IkFn>(b"rebotarm_math_ik\0")?;
             let gravity = *lib.get::<GravityFn>(b"rebotarm_math_generalized_gravity\0")?;
+            let num_total_params =
+                *lib.get::<NumTotalParamsFn>(b"rebotarm_math_num_total_parameters\0")?;
+            let build_regression =
+                *lib.get::<BuildRegressionFn>(b"rebotarm_math_build_regression_matrix\0")?;
+            let stack_tau = *lib.get::<StackTauFn>(b"rebotarm_math_stack_tau_samples\0")?;
+            let fit_ls = *lib.get::<FitLeastSquaresFn>(b"rebotarm_math_fit_least_squares\0")?;
+            let fit_base_qr = *lib.get::<FitBaseQrFn>(b"rebotarm_math_fit_base_parameters_qr\0")?;
+            let regression_metrics =
+                *lib.get::<RegressionMetricsFn>(b"rebotarm_math_regression_metrics\0")?;
             let last_error = *lib.get::<LastErrorFn>(b"rebotarm_math_last_error\0")?;
             Ok(Arc::new(Self {
                 _lib: lib,
@@ -1051,6 +1138,12 @@ impl MathApi {
                 fk,
                 ik,
                 gravity,
+                num_total_params,
+                build_regression,
+                stack_tau,
+                fit_ls,
+                fit_base_qr,
+                regression_metrics,
                 last_error,
             }))
         }
@@ -1200,6 +1293,163 @@ impl MathModel {
             return Err(self.api.last_error().into());
         }
         Ok(tau)
+    }
+
+    pub fn num_total_parameters(&self, include_friction: bool) -> Result<usize, Box<dyn Error>> {
+        let n = unsafe { (self.api.num_total_params)(self.handle, include_friction as c_int) };
+        if n <= 0 {
+            return Err(self.api.last_error().into());
+        }
+        Ok(n as usize)
+    }
+
+    pub fn build_regression_matrix(
+        &self,
+        q: &[f64],
+        dq: &[f64],
+        ddq: &[f64],
+        samples: usize,
+        include_friction: bool,
+        coulomb_eps: f64,
+    ) -> Result<Vec<f64>, Box<dyn Error>> {
+        let cols = self.num_total_parameters(include_friction)?;
+        let rows = samples * self.nq;
+        let mut y = vec![0.0_f64; rows * cols];
+        let rc = unsafe {
+            (self.api.build_regression)(
+                self.handle,
+                q.as_ptr(),
+                dq.as_ptr(),
+                ddq.as_ptr(),
+                samples as c_int,
+                self.nq as c_int,
+                include_friction as c_int,
+                coulomb_eps,
+                y.as_mut_ptr(),
+                rows as c_int,
+                cols as c_int,
+            )
+        };
+        if rc != 0 {
+            return Err(self.api.last_error().into());
+        }
+        Ok(y)
+    }
+
+    pub fn stack_tau_samples(
+        &self,
+        tau_samples: &[f64],
+        samples: usize,
+    ) -> Result<Vec<f64>, Box<dyn Error>> {
+        let mut tau = vec![0.0_f64; samples * self.nq];
+        let rc = unsafe {
+            (self.api.stack_tau)(
+                tau_samples.as_ptr(),
+                samples as c_int,
+                self.nq as c_int,
+                tau.as_mut_ptr(),
+                tau.len() as c_int,
+            )
+        };
+        if rc != 0 {
+            return Err(self.api.last_error().into());
+        }
+        Ok(tau)
+    }
+
+    pub fn fit_least_squares(
+        &self,
+        y: &[f64],
+        rows: usize,
+        cols: usize,
+        tau: &[f64],
+        rcond: f64,
+    ) -> Result<(Vec<f64>, Vec<f64>, CLsInfo), Box<dyn Error>> {
+        let mut beta = vec![0.0_f64; cols];
+        let mut tau_pred = vec![0.0_f64; rows];
+        let mut info = CLsInfo::default();
+        let rc = unsafe {
+            (self.api.fit_ls)(
+                y.as_ptr(),
+                rows as c_int,
+                cols as c_int,
+                tau.as_ptr(),
+                tau.len() as c_int,
+                rcond,
+                beta.as_mut_ptr(),
+                beta.len() as c_int,
+                tau_pred.as_mut_ptr(),
+                tau_pred.len() as c_int,
+                &mut info,
+            )
+        };
+        if rc != 0 {
+            return Err(self.api.last_error().into());
+        }
+        Ok((beta, tau_pred, info))
+    }
+
+    pub fn fit_base_qr(
+        &self,
+        y: &[f64],
+        rows: usize,
+        cols: usize,
+        tau: &[f64],
+        rcond: f64,
+    ) -> Result<(Vec<f64>, Vec<i32>, Vec<f64>, CLsInfo), Box<dyn Error>> {
+        let mut beta = vec![0.0_f64; cols];
+        let mut selected = vec![0_i32; cols];
+        let mut tau_pred = vec![0.0_f64; rows];
+        let mut info = CLsInfo::default();
+        let rank = unsafe {
+            (self.api.fit_base_qr)(
+                y.as_ptr(),
+                rows as c_int,
+                cols as c_int,
+                tau.as_ptr(),
+                tau.len() as c_int,
+                rcond,
+                beta.as_mut_ptr(),
+                beta.len() as c_int,
+                selected.as_mut_ptr(),
+                selected.len() as c_int,
+                tau_pred.as_mut_ptr(),
+                tau_pred.len() as c_int,
+                &mut info,
+            )
+        };
+        if rank < 0 {
+            return Err(self.api.last_error().into());
+        }
+        beta.truncate(rank as usize);
+        selected.truncate(rank as usize);
+        Ok((beta, selected, tau_pred, info))
+    }
+
+    pub fn regression_metrics(
+        &self,
+        tau: &[f64],
+        tau_pred: &[f64],
+    ) -> Result<(CMetrics, Vec<f64>, Vec<f64>), Box<dyn Error>> {
+        let mut metrics = CMetrics::default();
+        let mut rmse = vec![0.0_f64; self.nq];
+        let mut mae = vec![0.0_f64; self.nq];
+        let rc = unsafe {
+            (self.api.regression_metrics)(
+                tau.as_ptr(),
+                tau_pred.as_ptr(),
+                tau.len() as c_int,
+                self.nq as c_int,
+                &mut metrics,
+                rmse.as_mut_ptr(),
+                mae.as_mut_ptr(),
+                self.nq as c_int,
+            )
+        };
+        if rc != 0 {
+            return Err(self.api.last_error().into());
+        }
+        Ok((metrics, rmse, mae))
     }
 }
 

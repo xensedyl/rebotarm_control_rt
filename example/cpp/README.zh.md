@@ -296,6 +296,27 @@ q
 | `state` | 打印机械臂当前状态 |
 | `q` | 退出 |
 
+## 离线动力学参数辨识
+
+`13_identify_dynamics` 从 CSV 数据中读取 `q/dq/ddq/tau`，并使用 C++/Pinocchio 回归矩阵进行动力学参数辨识。
+
+```bash
+./example/cpp/build/13_identify_dynamics \
+  --data calibration/id_data_train.csv \
+  --mode full
+```
+
+使用 `--mode base` 可以辨识 QR 选择的独立最小参数集。C++ 示例会打印拟合误差和所选列号；如果需要
+YAML 输出或生成写入惯量的新 URDF，请使用 Python 示例。
+
+`14_verify_identification` 接收一个纯文本 beta 文件，文件中按空白符分隔参数值：
+
+```bash
+./example/cpp/build/14_verify_identification \
+  --data calibration/id_data_verify.csv \
+  --beta calibration/beta.txt
+```
+
 ## 参数
 
 所有使用数学后端的示例都支持指定 URDF：

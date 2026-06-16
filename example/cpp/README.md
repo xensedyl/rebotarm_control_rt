@@ -302,6 +302,30 @@ Interactive commands:
 | `state` | Print current arm state |
 | `q` | Quit |
 
+## Offline Dynamics Identification
+
+`13_identify_dynamics` reads a CSV dataset and fits dynamic parameters with the same C++/Pinocchio
+regressor used by the Python API.
+
+```bash
+./example/cpp/build/13_identify_dynamics \
+  --data calibration/id_data_train.csv \
+  --mode full
+```
+
+Use `--mode base` to fit a QR-selected independent parameter set. The C++ example prints the fit
+metrics and selected columns; use the Python example if you need YAML output or an identified URDF
+copy.
+
+`14_verify_identification` accepts a plain text beta vector, one value per whitespace-separated
+entry:
+
+```bash
+./example/cpp/build/14_verify_identification \
+  --data calibration/id_data_verify.csv \
+  --beta calibration/beta.txt
+```
+
 ## Options
 
 All math-backed examples accept an optional URDF path:

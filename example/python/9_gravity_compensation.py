@@ -6,6 +6,7 @@ dynamics feed-forward torque from the current joint state.
 
 Use on hardware only:
     python example/python/9_gravity_compensation.py --port /dev/ttyACM0 [--config arm.yaml] [--rate 200]
+    python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --urdf calibration/tool_calibration.urdf
 
 Ctrl+C stops the control loop and disconnects.
 """
@@ -32,7 +33,7 @@ from rebotarm_control_rt.dynamics import (
     get_default_gravity,
     load_dynamics_model,
 )
-from rebotarm_control_rt.kinematics import _URDF
+from rebotarm_control_rt.paths import resolve_urdf_path
 from _example_config import add_port_argument, config_with_port
 
 
@@ -57,11 +58,11 @@ def _str_to_bool(value: str | bool) -> bool:
     raise argparse.ArgumentTypeError("expected true or false")
 
 
-def _end_link_load_urdf(scale: float) -> str:
+def _end_link_load_urdf(urdf_path: str | Path | None, scale: float) -> str:
     if scale < 0.0:
         raise ValueError("--end-link-load-scale must be >= 0")
 
-    tree = ET.parse(_URDF)
+    tree = ET.parse(resolve_urdf_path(urdf_path))
     root = tree.getroot()
     end_link = root.find("./link[@name='end_link']")
     inertial = end_link.find("inertial") if end_link is not None else None
@@ -85,13 +86,21 @@ def _end_link_load_urdf(scale: float) -> str:
     return tmp.name
 
 
-def _load_gravity_model(use_gripper: bool):
-    scale = END_LINK_LOAD_SCALE_WITH_GRIPPER if use_gripper else 0.0
+def _default_end_link_load_scale(use_gripper: bool, urdf_path: str | Path | None) -> float:
+    if not use_gripper:
+        return 0.0
+    # The built-in B601 URDF keeps the historical tested load scale. Explicit
+    # URDFs are assumed to already contain the calibrated/identified tool load.
+    return 1.0 if urdf_path else END_LINK_LOAD_SCALE_WITH_GRIPPER
+
+
+def _load_gravity_model(urdf_path: str | Path | None, use_gripper: bool, end_link_load_scale: float | None):
+    scale = _default_end_link_load_scale(use_gripper, urdf_path) if end_link_load_scale is None else end_link_load_scale
     if scale == 1.0:
-        return load_dynamics_model()
-    tmp_urdf = _end_link_load_urdf(scale)
+        return load_dynamics_model(None if urdf_path is None else str(urdf_path)), scale
+    tmp_urdf = _end_link_load_urdf(urdf_path, scale)
     try:
-        return load_dynamics_model(tmp_urdf)
+        return load_dynamics_model(tmp_urdf), scale
     finally:
         Path(tmp_urdf).unlink(missing_ok=True)
 
@@ -101,7 +110,7 @@ def _mit_command_vectors(arm, model_nq: int, q_all: np.ndarray, tau_g: np.ndarra
     pos = q_all.copy()
     vel = np.zeros(n, dtype=float)
     kp = np.zeros(n, dtype=float)
-    kd = np.ones(n, dtype=float)
+    kd = np.full(n, args.kd, dtype=float)
     tau = np.zeros(n, dtype=float)
     tau[:model_nq] = tau_g
 
@@ -169,9 +178,14 @@ def make_gravity_compensation_controller(model, args) -> Callable:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument(
+        "--urdf",
+        default=None,
+        help="Dynamics URDF used for gravity compensation. Defaults to the SDK URDF.",
+    )
     add_port_argument(parser)
     parser.add_argument("--rate", type=float, default=None, help="Python callback loop rate in Hz.")
-    parser.add_argument("--kp", type=float, default=2.0, help="MIT mode stiffness written before loop start.")
+    parser.add_argument("--kp", type=float, default=0.0, help="MIT mode stiffness written before loop start.")
     parser.add_argument("--kd", type=float, default=1.0, help="MIT mode damping written before loop start.")
     parser.add_argument(
         "--use_gripper",
@@ -182,17 +196,27 @@ def main() -> None:
         metavar="{true,false}",
         help="Whether to include the fixed end_link gripper load in the gravity model.",
     )
+    parser.add_argument(
+        "--end-link-load-scale",
+        type=float,
+        default=None,
+        help=(
+            "Scale end_link inertial for gravity compensation. Default: 0.7 for the built-in "
+            "URDF with --use_gripper=true, 1.0 for an explicit --urdf, and 0.0 when "
+            "--use_gripper=false."
+        ),
+    )
     parser.add_argument("--gripper-kp", type=float, default=0.0, help="MIT stiffness for extra gripper joints.")
     parser.add_argument("--gripper-kd", type=float, default=1.0, help="MIT damping for extra gripper joints.")
     args = parser.parse_args()
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
-    model = _load_gravity_model(args.use_gripper)
-    end_link_scale = END_LINK_LOAD_SCALE_WITH_GRIPPER if args.use_gripper else 0.0
+    model, end_link_scale = _load_gravity_model(args.urdf, args.use_gripper, args.end_link_load_scale)
     print("=" * 60)
     print("  reBotArm RT gravity-compensation demo")
     print("=" * 60)
+    print(f"[urdf] {resolve_urdf_path(args.urdf)}")
     print(f"[model] nq={model.nq}, nv={model.nv}")
     print(f"[gravity] {get_default_gravity()} m/s^2")
     print(f"[gripper/end_link load] scale={end_link_scale:.3f}")
@@ -227,6 +251,7 @@ def main() -> None:
                 kd[model.nq:] = 0.0
         arm.mode_mit(kp=kp.tolist(), kd=kd.tolist())
         print(f"[MIT mode] kp={args.kp}, kd={args.kd}")
+        print(f"[MIT command] kp=0.0, kd={args.kd} during gravity compensation")
 
         if rate is None:
             rate = getattr(arm, "_rate", 200.0)

@@ -348,6 +348,209 @@ tool_model = load_robot_model("tool_calibration.urdf")
 | `--gravity-scale` | 重力前馈力矩倍率，`tau = gravity_scale * g(q)`。先从 `1.0` 开始；如果机械臂往下沉，略微增大；如果自己往上飘，略微减小。建议每次按 `0.02` 到 `0.05` 小步调整。 |
 | `--kd` | 自由拖动时 MIT 阻尼。值越大越稳、越不松；值越小越轻，但可能更容易抖。 |
 
+## 动力学参数辨识
+
+当前推荐用重力补偿自由拖动录轨迹，再用 POS_VEL 回放这条真实手拖轨迹采集
+`q/dq/ddq/tau`。轨迹已经由人手在真实环境里检查过，比离线随机生成轨迹更安全。
+
+`11_record_gravity_trajectory.py` 启动后会进入重力补偿。手拖到起点后按 Enter 开始录制，再按
+Enter 停止录制并保存；保存后仍保持重力补偿，手拖回零点或安全姿态后按 `Ctrl+C` 退出。
+如果机械臂下沉，略微增大 `--gravity-scale`；如果上飘，略微减小。
+
+辨识数据 CSV 列格式固定为：
+
+```text
+time,q1,q2,q3,q4,q5,q6,dq1,...,dq6,ddq1,...,ddq6,tau1,...,tau6
+```
+
+单位分别是 rad、rad/s、rad/s^2、Nm。实际使用分成下面两套完整流程。
+
+### 方案 A：先机械臂，再机械臂加夹爪
+
+这个方案用于尽量把机械臂本体和新夹爪分开。第一阶段拆掉夹爪或确保末端不带额外负载；第二阶段装上新夹爪，只辨识 `end_link` 负载。这个方案最适合调重力补偿手感。
+
+#### A1. 录制机械臂本体轨迹
+
+```bash
+python example/python/11_record_gravity_trajectory.py \
+  --output calibration/arm_only_trajectory.csv \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0 \
+  --use_gripper=false
+```
+
+#### A2. 预览机械臂本体轨迹
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/arm_only_trajectory.csv \
+  --output calibration/id_data_arm_only.csv \
+  --port /dev/ttyACM0
+```
+
+#### A3. 回放并采集机械臂本体数据
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/arm_only_trajectory.csv \
+  --output calibration/id_data_arm_only.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### A4. 辨识机械臂本体
+
+```bash
+python example/python/13_identify_dynamics.py \
+  --data calibration/id_data_arm_only.csv \
+  --mode full \
+  --ignore-payload-link end_link \
+  --output calibration/identified_arm.yaml \
+  --urdf-output calibration/identified_arm.urdf
+```
+
+`--ignore-payload-link end_link` 会在辨识时临时移除 `end_link` 的 inertial，避免旧夹爪参数污染机械臂本体结果。
+
+#### A5. 装上新夹爪后录制轨迹
+
+```bash
+python example/python/11_record_gravity_trajectory.py \
+  --output calibration/arm_with_gripper_trajectory.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0
+```
+
+#### A6. 预览机械臂加夹爪轨迹
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/arm_with_gripper_trajectory.csv \
+  --output calibration/id_data_arm_with_gripper.csv \
+  --port /dev/ttyACM0
+```
+
+#### A7. 回放并采集机械臂加夹爪数据
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/arm_with_gripper_trajectory.csv \
+  --output calibration/id_data_arm_with_gripper.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### A8. 只辨识夹爪负载
+
+```bash
+python example/python/13_identify_dynamics.py \
+  --data calibration/id_data_arm_with_gripper.csv \
+  --urdf calibration/identified_arm.urdf \
+  --mode payload \
+  --payload-link end_link \
+  --payload-parameters 4 \
+  --output calibration/identified_gripper_payload.yaml \
+  --urdf-output calibration/identified_arm_with_gripper.urdf
+```
+
+如果轨迹里速度和加速度激励足够，也可以把最后一条命令中的 `--payload-parameters 4` 改成
+`--payload-parameters 10`。4 参数只辨识质量和质心，更适合先修重力补偿；10 参数会辨识完整惯量，但更容易受数据质量影响。
+
+#### A9. 用辨识后的 URDF 测试重力补偿
+
+```bash
+python example/python/9_gravity_compensation.py \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_arm_with_gripper.urdf
+```
+
+### 方案 B：机械臂加夹爪一起辨识
+
+这个方案更快，适合你认为机械臂和夹爪都不准，并且接受 `link6` 和 fixed `end_link` 参数强耦合的情况。它能直接得到一个整体拟合模型，但物理参数分配不一定唯一。
+
+#### B1. 录制机械臂加夹爪轨迹
+
+```bash
+python example/python/11_record_gravity_trajectory.py \
+  --output calibration/all_with_gripper_trajectory.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0
+```
+
+#### B2. 预览轨迹
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/all_with_gripper_trajectory.csv \
+  --output calibration/id_data_all_with_gripper.csv \
+  --port /dev/ttyACM0
+```
+
+#### B3. 回放并采集数据
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/all_with_gripper_trajectory.csv \
+  --output calibration/id_data_all_with_gripper.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### B4. 机械臂和夹爪一起辨识
+
+```bash
+python example/python/13_identify_dynamics.py \
+  --data calibration/id_data_all_with_gripper.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --mode full \
+  --output calibration/identified_dynamics_all.yaml \
+  --urdf-output calibration/identified_dynamics_all.urdf
+```
+
+#### B5. 用整体辨识 URDF 测试重力补偿
+
+```bash
+python example/python/9_gravity_compensation.py \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_dynamics_all.urdf
+```
+
+常用参数：
+
+| 参数 | 说明 |
+|---|---|
+| `--mode full` | 机械臂和夹爪一起辨识完整动态参数向量，可以写回 URDF。 |
+| `--mode base` | 使用 QR 选择独立最小参数集，数值上通常更稳，但不能唯一写回每个 link 的 URDF 惯量。 |
+| `--mode payload` | 固定机械臂 URDF，只辨识一个固定负载 link，默认是 `end_link`。适合两阶段方案的第二步。 |
+| `--urdf-output` | 基于输入 URDF 输出一份写入辨识惯量的新 URDF。`full` 和 `payload` 可用。`base` 不能唯一写回 URDF。 |
+| `--payload-parameters 4` | 只辨识夹爪质量和质心，推荐先用这个修重力补偿。 |
+| `--payload-parameters 10` | 辨识夹爪完整 10 参数惯量，需要更丰富的动态激励。 |
+| `--ignore-payload-link end_link` | 机械臂本体辨识时临时忽略末端固定负载。 |
+| `--no-friction` | 只辨识刚体惯性参数。默认包含粘性摩擦和光滑库伦摩擦列。 |
+| `--no-model-prior` | full 模式下使用纯最小范数最小二乘。默认会让不可辨识零空间保持接近输入 URDF，更适合写回 URDF。 |
+
+`14_verify_identification.py` 只支持 `full/base` 结果。如果你有另一段验证数据，可以验证方案 B 或方案 A 的机械臂本体结果：
+
+```bash
+python example/python/14_verify_identification.py \
+  --data calibration/id_data_verify.csv \
+  --params calibration/identified_dynamics_all.yaml
+```
+
 ## MeshCat 仿真
 
 可选仿真示例位于 `example/python/sim/`。它们只是在可视化层需要 Python `meshcat` 和 Python `pinocchio`；运动学和轨迹计算仍然走本包的 C++ 绑定。

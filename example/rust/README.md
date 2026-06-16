@@ -344,6 +344,21 @@ Interactive commands:
 | `state` | Print arm and gripper state |
 | `q` | Stop and disconnect |
 
+## Offline Dynamics Identification
+
+`13_identify_dynamics.rs` reads a CSV dataset and calls the same C++/Pinocchio identification
+backend through the C ABI.
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 13_identify_dynamics -- \
+  --data calibration/id_data_train.csv \
+  --mode full
+```
+
+Use `--mode base` to fit a QR-selected independent parameter set. The Rust example prints fit
+metrics and selected columns; use the Python example if you need YAML output or an identified URDF
+copy.
+
 ## Build Check
 
 Use offline mode if the required crates are already cached:

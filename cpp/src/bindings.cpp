@@ -2,6 +2,7 @@
 // 暴露与 reBotArm_control_py 的 kinematics 同名的类型与函数，Python 侧纯 re-export。
 #include "rebotarm/robot_model.hpp"
 #include "rebotarm/dynamics.hpp"
+#include "rebotarm/identification.hpp"
 #include "rebotarm/trajectory.hpp"
 #include "rebotarm/arm_endpos.hpp"
 #include "rebotarm/se3_conv.hpp"
@@ -105,6 +106,29 @@ PYBIND11_MODULE(_math, m) {
            py::arg("q_seed"), py::arg("end_frame_id"), py::arg("params") = IKParams(),
            py::arg("max_retries") = 8);
 
+  py::class_<rebotarm::ident::LeastSquaresResult>(m, "LeastSquaresResult")
+      .def_readonly("beta", &rebotarm::ident::LeastSquaresResult::beta)
+      .def_readonly("tau_pred", &rebotarm::ident::LeastSquaresResult::tau_pred)
+      .def_readonly("rank", &rebotarm::ident::LeastSquaresResult::rank)
+      .def_readonly("condition", &rebotarm::ident::LeastSquaresResult::condition)
+      .def_readonly("residual_norm", &rebotarm::ident::LeastSquaresResult::residual_norm);
+
+  py::class_<rebotarm::ident::BaseParameterResult>(m, "BaseParameterResult")
+      .def_readonly("beta_base", &rebotarm::ident::BaseParameterResult::beta_base)
+      .def_readonly("selected_columns", &rebotarm::ident::BaseParameterResult::selected_columns)
+      .def_readonly("tau_pred", &rebotarm::ident::BaseParameterResult::tau_pred)
+      .def_readonly("rank", &rebotarm::ident::BaseParameterResult::rank)
+      .def_readonly("condition", &rebotarm::ident::BaseParameterResult::condition)
+      .def_readonly("residual_norm", &rebotarm::ident::BaseParameterResult::residual_norm);
+
+  py::class_<rebotarm::ident::RegressionMetrics>(m, "RegressionMetrics")
+      .def_readonly("rmse", &rebotarm::ident::RegressionMetrics::rmse)
+      .def_readonly("mae", &rebotarm::ident::RegressionMetrics::mae)
+      .def_readonly("max_abs", &rebotarm::ident::RegressionMetrics::max_abs)
+      .def_readonly("r2", &rebotarm::ident::RegressionMetrics::r2)
+      .def_readonly("per_joint_rmse", &rebotarm::ident::RegressionMetrics::per_joint_rmse)
+      .def_readonly("per_joint_mae", &rebotarm::ident::RegressionMetrics::per_joint_mae);
+
   // 模块级函数（镜像 kinematics/*.py 名称，供 Python 纯 re-export）
   m.def("load_robot_model", [](const std::string& urdf_path) { return RobotModel(urdf_path); },
         py::arg("urdf_path"));
@@ -158,6 +182,33 @@ PYBIND11_MODULE(_math, m) {
   m.def("generalized_gravity_derivatives", &d::generalized_gravity_derivatives, py::arg("model"),
         py::arg("q"));
   m.def("mass_matrix_derivatives", &d::mass_matrix_derivatives, py::arg("model"), py::arg("q"));
+
+  // ── 动力学参数辨识 ──────────────────────────────────────────────────────
+  namespace id = rebotarm::ident;
+  m.def("joint_torque_regressor", &id::joint_torque_regressor, py::arg("model"), py::arg("q"),
+        py::arg("v"), py::arg("a"));
+  m.def("friction_regressor", &id::friction_regressor, py::arg("v"),
+        py::arg("coulomb_eps") = 1e-3);
+  m.def("build_regression_matrix", &id::build_regression_matrix, py::arg("model"),
+        py::arg("q_samples"), py::arg("v_samples"), py::arg("a_samples"),
+        py::arg("include_friction") = true, py::arg("coulomb_eps") = 1e-3);
+  m.def("stack_tau_samples", &id::stack_tau_samples, py::arg("tau_samples"));
+  m.def("fit_least_squares", &id::fit_least_squares, py::arg("Y"), py::arg("tau"),
+        py::arg("rcond") = 1e-12);
+  m.def("fit_base_parameters_qr", &id::fit_base_parameters_qr, py::arg("Y"), py::arg("tau"),
+        py::arg("rcond") = 1e-12);
+  m.def("regression_metrics", &id::regression_metrics, py::arg("tau"), py::arg("tau_pred"),
+        py::arg("dof"));
+  m.def("condition_number", &id::condition_number, py::arg("Y"), py::arg("rcond") = 1e-12);
+  m.def("model_dynamic_parameters", &id::model_dynamic_parameters, py::arg("model"));
+  m.def("num_dynamic_parameters", &id::num_dynamic_parameters, py::arg("model"));
+  m.def("num_total_parameters", &id::num_total_parameters, py::arg("model"),
+        py::arg("include_friction") = true);
+  m.def("dynamic_parameter_block_names", &id::dynamic_parameter_block_names, py::arg("model"));
+  m.def("dynamic_parameter_names", &id::dynamic_parameter_names, py::arg("model"));
+  m.def("friction_parameter_names", &id::friction_parameter_names, py::arg("dof"));
+  m.def("total_parameter_names", &id::total_parameter_names, py::arg("model"),
+        py::arg("include_friction") = true);
 
   // ── 轨迹（镜像 trajectory/*.py） ──────────────────────────────────────────
   namespace t = rebotarm::traj;
