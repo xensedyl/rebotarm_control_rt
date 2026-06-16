@@ -40,6 +40,10 @@ example/rust/
         ├── 8_arm_traj_control.rs
         ├── 9_gravity_compensation.rs
         ├── 10_gravity_compensation_lock.rs
+        ├── 11_record_gravity_trajectory.rs
+        ├── 12_collect_identification_data.rs
+        ├── 13_identify_dynamics.rs
+        ├── 14_verify_identification.rs
         ├── gripper_test.rs
         └── read_damiao_pd.rs
 ```
@@ -333,19 +337,198 @@ cargo run --manifest-path example/rust/Cargo.toml --bin gripper_test -- --port /
 | `state` | 打印机械臂和夹爪状态 |
 | `q` | 停止并断开 |
 
-## 离线动力学参数辨识
+## 动力学参数辨识
 
-`13_identify_dynamics.rs` 从 CSV 数据中读取 `q/dq/ddq/tau`，并通过 C ABI 调用同一个
-C++/Pinocchio 动力学辨识后端。
+当前推荐用重力补偿自由拖动录轨迹，再用 POS_VEL 回放这条真实手拖轨迹采集
+`q/dq/ddq/tau`。轨迹已经由人手在真实环境里检查过，比离线随机生成轨迹更安全。
+
+`11_record_gravity_trajectory.rs` 启动后会进入重力补偿。手拖到起点后按 Enter 开始录制，再按
+Enter 停止录制并保存；保存后仍保持重力补偿，手拖回零点或安全姿态后按 `Ctrl+C` 退出。
+如果机械臂下沉，略微增大 `--gravity-scale`；如果上飘，略微减小。
+
+辨识数据 CSV 列格式固定为：
+
+```text
+time,q1,q2,q3,q4,q5,q6,dq1,...,dq6,ddq1,...,ddq6,tau1,...,tau6
+```
+
+单位分别是 rad、rad/s、rad/s^2、Nm。实际使用分成下面两套完整流程。
+
+### 方案 A：先机械臂，再机械臂加夹爪
+
+这个方案用于尽量把机械臂本体和新夹爪分开。第一阶段拆掉夹爪或确保末端不带额外负载；第二阶段装上新夹爪，只辨识 `end_link` 负载。这个方案最适合调重力补偿手感。
+
+#### A1. 录制机械臂本体轨迹
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 11_record_gravity_trajectory -- \
+  --output calibration/arm_only_trajectory.csv \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0 \
+  --use_gripper=false
+```
+
+#### A2. 预览机械臂本体轨迹
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/arm_only_trajectory.csv \
+  --output calibration/id_data_arm_only.csv \
+  --port /dev/ttyACM0
+```
+
+#### A3. 回放并采集机械臂本体数据
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/arm_only_trajectory.csv \
+  --output calibration/id_data_arm_only.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### A4. 辨识机械臂本体
 
 ```bash
 cargo run --manifest-path example/rust/Cargo.toml --bin 13_identify_dynamics -- \
-  --data calibration/id_data_train.csv \
-  --mode full
+  --data calibration/id_data_arm_only.csv \
+  --mode full \
+  --ignore-payload-link end_link \
+  --output calibration/identified_arm_rust.yaml \
+  --urdf-output calibration/identified_arm_rust.urdf
 ```
 
-使用 `--mode base` 可以辨识 QR 选择的独立最小参数集。Rust 示例会打印拟合误差和所选列号；
-如果需要 YAML 输出或生成写入惯量的新 URDF，请使用 Python 示例。
+`--ignore-payload-link end_link` 会在辨识时临时移除 `end_link` 的 inertial，避免旧夹爪参数污染机械臂本体结果。
+
+#### A5. 装上新夹爪后录制轨迹
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 11_record_gravity_trajectory -- \
+  --output calibration/arm_with_gripper_trajectory.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0
+```
+
+#### A6. 预览机械臂加夹爪轨迹
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/arm_with_gripper_trajectory.csv \
+  --output calibration/id_data_arm_with_gripper.csv \
+  --port /dev/ttyACM0
+```
+
+#### A7. 回放并采集机械臂加夹爪数据
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/arm_with_gripper_trajectory.csv \
+  --output calibration/id_data_arm_with_gripper.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### A8. 只辨识夹爪负载
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 13_identify_dynamics -- \
+  --data calibration/id_data_arm_with_gripper.csv \
+  --urdf calibration/identified_arm_rust.urdf \
+  --mode payload \
+  --payload-link end_link \
+  --payload-parameters 4 \
+  --output calibration/identified_gripper_payload_rust.yaml \
+  --urdf-output calibration/identified_arm_with_gripper_rust.urdf
+```
+
+如果轨迹里速度和加速度激励足够，也可以把最后一条命令中的 `--payload-parameters 4` 改成
+`--payload-parameters 10`。4 参数只辨识质量和质心，更适合先修重力补偿；10 参数会辨识完整惯量，但更容易受数据质量影响。
+
+#### A9. 用辨识后的 URDF 测试重力补偿
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 9_gravity_compensation -- \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_arm_with_gripper_rust.urdf
+```
+
+### 方案 B：机械臂加夹爪一起辨识
+
+这个方案更快，适合你认为机械臂和夹爪都不准，并且接受 `link6` 和 fixed `end_link` 参数强耦合的情况。它能直接得到一个整体拟合模型，但物理参数分配不一定唯一。
+
+#### B1. 录制机械臂加夹爪轨迹
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 11_record_gravity_trajectory -- \
+  --output calibration/all_with_gripper_trajectory.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0
+```
+
+#### B2. 预览轨迹
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/all_with_gripper_trajectory.csv \
+  --output calibration/id_data_all_with_gripper.csv \
+  --port /dev/ttyACM0
+```
+
+#### B3. 回放并采集数据
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/all_with_gripper_trajectory.csv \
+  --output calibration/id_data_all_with_gripper.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### B4. 机械臂和夹爪一起辨识
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 13_identify_dynamics -- \
+  --data calibration/id_data_all_with_gripper.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --mode full \
+  --output calibration/identified_dynamics_all_rust.yaml \
+  --urdf-output calibration/identified_dynamics_all_rust.urdf
+```
+
+Rust full 模式写回 URDF 时，会把 fixed 子链惯量折叠到对应的可动关节子 link，并移除 fixed 子 link 的 inertial。
+
+#### B5. 用整体辨识 URDF 测试重力补偿
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 9_gravity_compensation -- \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_dynamics_all_rust.urdf
+```
+
+使用 `--mode base` 可以辨识 QR 选择的独立最小参数集。`base` 参数不能唯一写回 URDF。
+
+`14_verify_identification.rs` 只支持 `full/base` 结果。如果你有另一段验证数据，可以验证方案 B 或方案 A 的机械臂本体结果：
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 14_verify_identification -- \
+  --data calibration/id_data_verify.csv \
+  --params calibration/identified_dynamics_all_rust.yaml
+```
 
 ## 构建检查
 

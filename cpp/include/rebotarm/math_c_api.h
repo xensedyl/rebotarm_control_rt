@@ -64,8 +64,24 @@ int rebotarm_math_generalized_gravity(
     double* out_tau,
     int out_len);
 
+int rebotarm_math_inverse_dynamics(
+    const RebotarmMathModel* model,
+    const double* q,
+    int q_len,
+    const double* v,
+    int v_len,
+    const double* a,
+    int a_len,
+    double* out_tau,
+    int out_len);
+
 int rebotarm_math_num_dynamic_parameters(const RebotarmMathModel* model);
 int rebotarm_math_num_total_parameters(const RebotarmMathModel* model, int include_friction);
+
+int rebotarm_math_model_dynamic_parameters(
+    const RebotarmMathModel* model,
+    double* out_params,
+    int out_len);
 
 int rebotarm_math_build_regression_matrix(
     const RebotarmMathModel* model,

@@ -217,6 +217,35 @@ int rebotarm_math_generalized_gravity(const RebotarmMathModel* model,
   }
 }
 
+int rebotarm_math_inverse_dynamics(const RebotarmMathModel* model,
+                                   const double* q,
+                                   int q_len,
+                                   const double* v,
+                                   int v_len,
+                                   const double* a,
+                                   int a_len,
+                                   double* out_tau,
+                                   int out_len) {
+  try {
+    if (!valid_model(model)) return fail("model is null");
+    if (!q || !v || !a) return fail("q/v/a is null");
+    if (!out_tau) return fail("out_tau is null");
+    if (q_len != model->model->nq()) return fail("q length mismatch");
+    if (v_len != model->model->nv()) return fail("v length mismatch");
+    if (a_len != model->model->nv()) return fail("a length mismatch");
+    const Eigen::VectorXd tau = rebotarm::dyn::inverse_dynamics(
+        *model->model,
+        vector_from_ptr(q, q_len),
+        vector_from_ptr(v, v_len),
+        vector_from_ptr(a, a_len));
+    if (out_len < tau.size()) return fail("out_tau too small");
+    vector_to_ptr(tau, out_tau, out_len);
+    return 0;
+  } catch (const std::exception& e) {
+    return fail(e.what());
+  }
+}
+
 int rebotarm_math_num_dynamic_parameters(const RebotarmMathModel* model) {
   try {
     if (!valid_model(model)) return fail("model is null");
@@ -230,6 +259,21 @@ int rebotarm_math_num_total_parameters(const RebotarmMathModel* model, int inclu
   try {
     if (!valid_model(model)) return fail("model is null");
     return rebotarm::ident::num_total_parameters(*model->model, include_friction != 0);
+  } catch (const std::exception& e) {
+    return fail(e.what());
+  }
+}
+
+int rebotarm_math_model_dynamic_parameters(const RebotarmMathModel* model,
+                                           double* out_params,
+                                           int out_len) {
+  try {
+    if (!valid_model(model)) return fail("model is null");
+    if (!out_params) return fail("out_params is null");
+    const Eigen::VectorXd params = rebotarm::ident::model_dynamic_parameters(*model->model);
+    if (out_len < params.size()) return fail("out_params too small");
+    vector_to_ptr(params, out_params, out_len);
+    return 0;
   } catch (const std::exception& e) {
     return fail(e.what());
   }

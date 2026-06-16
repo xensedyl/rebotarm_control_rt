@@ -276,9 +276,19 @@ pub fn gravity_urdf_for_gripper(
     args: &[String],
     use_gripper: bool,
 ) -> Result<(PathBuf, Option<TemporaryUrdf>, f64), Box<dyn Error>> {
-    let base_urdf = parse_urdf_path(args);
-    let scale = if use_gripper {
-        END_LINK_LOAD_SCALE_WITH_GRIPPER
+    let explicit_urdf = arg_value(args, "--urdf");
+    let base_urdf = explicit_urdf
+        .as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(default_urdf_path);
+    let scale = if let Some(value) = arg_value(args, "--end-link-load-scale") {
+        value.parse::<f64>()?
+    } else if use_gripper {
+        if explicit_urdf.is_some() {
+            1.0
+        } else {
+            END_LINK_LOAD_SCALE_WITH_GRIPPER
+        }
     } else {
         0.0
     };
@@ -1004,7 +1014,20 @@ type IkFn = unsafe extern "C" fn(
 ) -> c_int;
 type GravityFn =
     unsafe extern "C" fn(*const c_void, *const c_double, c_int, *mut c_double, c_int) -> c_int;
+type InverseDynamicsFn = unsafe extern "C" fn(
+    *const c_void,
+    *const c_double,
+    c_int,
+    *const c_double,
+    c_int,
+    *const c_double,
+    c_int,
+    *mut c_double,
+    c_int,
+) -> c_int;
+type NumDynamicParamsFn = unsafe extern "C" fn(*const c_void) -> c_int;
 type NumTotalParamsFn = unsafe extern "C" fn(*const c_void, c_int) -> c_int;
+type ModelDynamicParamsFn = unsafe extern "C" fn(*const c_void, *mut c_double, c_int) -> c_int;
 type BuildRegressionFn = unsafe extern "C" fn(
     *const c_void,
     *const c_double,
@@ -1096,7 +1119,10 @@ struct MathApi {
     fk: FkFn,
     ik: IkFn,
     gravity: GravityFn,
+    inverse_dynamics: InverseDynamicsFn,
+    num_dynamic_params: NumDynamicParamsFn,
     num_total_params: NumTotalParamsFn,
+    model_dynamic_params: ModelDynamicParamsFn,
     build_regression: BuildRegressionFn,
     stack_tau: StackTauFn,
     fit_ls: FitLeastSquaresFn,
@@ -1118,8 +1144,14 @@ impl MathApi {
             let fk = *lib.get::<FkFn>(b"rebotarm_math_fk\0")?;
             let ik = *lib.get::<IkFn>(b"rebotarm_math_ik\0")?;
             let gravity = *lib.get::<GravityFn>(b"rebotarm_math_generalized_gravity\0")?;
+            let inverse_dynamics =
+                *lib.get::<InverseDynamicsFn>(b"rebotarm_math_inverse_dynamics\0")?;
+            let num_dynamic_params =
+                *lib.get::<NumDynamicParamsFn>(b"rebotarm_math_num_dynamic_parameters\0")?;
             let num_total_params =
                 *lib.get::<NumTotalParamsFn>(b"rebotarm_math_num_total_parameters\0")?;
+            let model_dynamic_params =
+                *lib.get::<ModelDynamicParamsFn>(b"rebotarm_math_model_dynamic_parameters\0")?;
             let build_regression =
                 *lib.get::<BuildRegressionFn>(b"rebotarm_math_build_regression_matrix\0")?;
             let stack_tau = *lib.get::<StackTauFn>(b"rebotarm_math_stack_tau_samples\0")?;
@@ -1138,7 +1170,10 @@ impl MathApi {
                 fk,
                 ik,
                 gravity,
+                inverse_dynamics,
+                num_dynamic_params,
                 num_total_params,
+                model_dynamic_params,
                 build_regression,
                 stack_tau,
                 fit_ls,
@@ -1295,12 +1330,58 @@ impl MathModel {
         Ok(tau)
     }
 
+    pub fn inverse_dynamics_cpp(
+        &self,
+        q: &[f64],
+        dq: &[f64],
+        ddq: &[f64],
+    ) -> Result<Vec<f64>, Box<dyn Error>> {
+        let mut tau = vec![0.0_f64; self.nq];
+        let rc = unsafe {
+            (self.api.inverse_dynamics)(
+                self.handle,
+                q.as_ptr(),
+                q.len() as c_int,
+                dq.as_ptr(),
+                dq.len() as c_int,
+                ddq.as_ptr(),
+                ddq.len() as c_int,
+                tau.as_mut_ptr(),
+                tau.len() as c_int,
+            )
+        };
+        if rc != 0 {
+            return Err(self.api.last_error().into());
+        }
+        Ok(tau)
+    }
+
+    pub fn num_dynamic_parameters(&self) -> Result<usize, Box<dyn Error>> {
+        let n = unsafe { (self.api.num_dynamic_params)(self.handle) };
+        if n <= 0 {
+            return Err(self.api.last_error().into());
+        }
+        Ok(n as usize)
+    }
+
     pub fn num_total_parameters(&self, include_friction: bool) -> Result<usize, Box<dyn Error>> {
         let n = unsafe { (self.api.num_total_params)(self.handle, include_friction as c_int) };
         if n <= 0 {
             return Err(self.api.last_error().into());
         }
         Ok(n as usize)
+    }
+
+    pub fn model_dynamic_parameters(&self) -> Result<Vec<f64>, Box<dyn Error>> {
+        let len = self.num_dynamic_parameters()?;
+        let mut params = vec![0.0_f64; len];
+        let rc = unsafe {
+            (self.api.model_dynamic_params)(self.handle, params.as_mut_ptr(), params.len() as c_int)
+        };
+        if rc != 0 {
+            return Err(self.api.last_error().into());
+        }
+        Ok(params)
     }
 
     pub fn build_regression_matrix(

@@ -591,8 +591,15 @@ struct GravityUrdf {
 };
 
 inline GravityUrdf gravity_urdf_for_gripper(int argc, char** argv, bool use_gripper) {
-  const std::string base_urdf = urdf_arg(argc, argv);
-  const double scale = use_gripper ? kEndLinkLoadScaleWithGripper : 0.0;
+  const std::string explicit_urdf = arg_value(argc, argv, "--urdf");
+  const std::string base_urdf = explicit_urdf.empty() ? default_urdf_path() : explicit_urdf;
+  const std::string explicit_scale = arg_value(argc, argv, "--end-link-load-scale");
+  const double scale = !explicit_scale.empty()
+                           ? std::stod(explicit_scale)
+                           : (!use_gripper ? 0.0
+                                           : (explicit_urdf.empty()
+                                                  ? kEndLinkLoadScaleWithGripper
+                                                  : 1.0));
   if (std::abs(scale - 1.0) <= std::numeric_limits<double>::epsilon()) {
     return GravityUrdf{base_urdf, nullptr, scale};
   }

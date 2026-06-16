@@ -100,32 +100,184 @@ std::vector<double> load_beta_txt(const std::string& path) {
   return values;
 }
 
+std::string read_text_file(const std::string& path) {
+  std::ifstream in(path);
+  if (!in) throw std::runtime_error("failed to open " + path);
+  std::ostringstream buffer;
+  buffer << in.rdbuf();
+  return buffer.str();
+}
+
+std::string trim(const std::string& text) {
+  const auto start = text.find_first_not_of(" \t\r\n");
+  if (start == std::string::npos) return "";
+  const auto end = text.find_last_not_of(" \t\r\n");
+  return text.substr(start, end - start + 1);
+}
+
+std::string unquote(std::string text) {
+  text = trim(text);
+  if (text.size() >= 2 && ((text.front() == '"' && text.back() == '"') ||
+                           (text.front() == '\'' && text.back() == '\''))) {
+    return text.substr(1, text.size() - 2);
+  }
+  return text;
+}
+
+std::optional<std::string> yaml_value_tail(const std::string& yaml, const std::string& key) {
+  std::istringstream in(yaml);
+  std::string line;
+  const std::string prefix = key + ":";
+  while (std::getline(in, line)) {
+    const std::string stripped = trim(line);
+    if (stripped.rfind(prefix, 0) == 0) return trim(stripped.substr(prefix.size()));
+  }
+  return std::nullopt;
+}
+
+std::string yaml_string(const std::string& yaml, const std::string& key,
+                        const std::string& default_value = "") {
+  const auto value = yaml_value_tail(yaml, key);
+  return value ? unquote(*value) : default_value;
+}
+
+bool yaml_bool(const std::string& yaml, const std::string& key, bool default_value) {
+  const auto value = yaml_value_tail(yaml, key);
+  if (!value) return default_value;
+  const std::string lower = [&] {
+    std::string out = trim(*value);
+    std::transform(out.begin(), out.end(), out.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return out;
+  }();
+  return lower == "true" || lower == "1" || lower == "yes" || lower == "on";
+}
+
+std::vector<double> parse_number_list_body(std::string body) {
+  for (char& ch : body) {
+    if (ch == ',' || ch == '[' || ch == ']') ch = ' ';
+  }
+  std::istringstream in(body);
+  std::vector<double> values;
+  double value = 0.0;
+  while (in >> value) values.push_back(value);
+  return values;
+}
+
+std::vector<double> yaml_float_vector(const std::string& yaml, const std::string& key) {
+  std::istringstream in(yaml);
+  std::string line;
+  const std::string prefix = key + ":";
+  bool in_block = false;
+  std::string body;
+  while (std::getline(in, line)) {
+    const std::string stripped = trim(line);
+    if (!in_block && stripped.rfind(prefix, 0) == 0) {
+      std::string tail = trim(stripped.substr(prefix.size()));
+      if (tail.find('[') != std::string::npos) {
+        body += tail;
+        while (body.find(']') == std::string::npos && std::getline(in, line)) body += " " + trim(line);
+        return parse_number_list_body(body);
+      }
+      in_block = true;
+      continue;
+    }
+    if (in_block) {
+      if (stripped.rfind("- ", 0) != 0) break;
+      body += " " + stripped.substr(2);
+    }
+  }
+  return parse_number_list_body(body);
+}
+
+std::vector<int> yaml_int_vector(const std::string& yaml, const std::string& key) {
+  const auto floats = yaml_float_vector(yaml, key);
+  std::vector<int> values;
+  values.reserve(floats.size());
+  for (double value : floats) values.push_back(static_cast<int>(value));
+  return values;
+}
+
+Eigen::VectorXd vector_to_eigen(const std::vector<double>& values) {
+  Eigen::VectorXd out(values.size());
+  for (int i = 0; i < out.size(); ++i) out[i] = values[i];
+  return out;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
   try {
     if (example::has_flag(argc, argv, "--help") || example::has_flag(argc, argv, "-h")) {
-      std::cout << "Usage: ./14_verify_identification --data id_verify.csv --beta beta.txt "
-                   "[--urdf robot.urdf] [--no-friction]\n";
+      std::cout << "Usage: ./14_verify_identification --data id_verify.csv "
+                   "--params identified.yaml [--urdf robot.urdf]\n"
+                   "   or: ./14_verify_identification --data id_verify.csv "
+                   "--beta beta.txt [--urdf robot.urdf] [--no-friction]\n";
       return 0;
     }
     const std::string data_path = example::arg_value(argc, argv, "--data");
+    const std::string params_path = example::arg_value(argc, argv, "--params");
     const std::string beta_path = example::arg_value(argc, argv, "--beta");
-    if (data_path.empty() || beta_path.empty()) throw std::runtime_error("--data and --beta are required");
-    const bool include_friction = !example::has_flag(argc, argv, "--no-friction");
-    const double coulomb_eps = example::arg_double(argc, argv, "--coulomb-eps", 1e-3);
+    if (data_path.empty() || (params_path.empty() && beta_path.empty())) {
+      throw std::runtime_error("--data and either --params or --beta are required");
+    }
 
-    rebotarm::RobotModel model(example::urdf_arg(argc, argv));
+    std::string yaml;
+    std::string mode = "full";
+    bool include_friction = !example::has_flag(argc, argv, "--no-friction");
+    double coulomb_eps = example::arg_double(argc, argv, "--coulomb-eps", 1e-3);
+    std::vector<double> beta_values;
+    std::vector<int> selected_columns;
+    std::string urdf_path = example::arg_value(argc, argv, "--urdf");
+
+    if (!params_path.empty()) {
+      yaml = read_text_file(params_path);
+      mode = yaml_string(yaml, "mode", "full");
+      include_friction = yaml_bool(yaml, "include_friction", true);
+      if (example::has_flag(argc, argv, "--no-friction")) include_friction = false;
+      const std::string coulomb = yaml_string(yaml, "coulomb_eps");
+      if (!coulomb.empty()) coulomb_eps = std::stod(coulomb);
+      if (urdf_path.empty()) urdf_path = yaml_string(yaml, "input_urdf", example::default_urdf_path());
+      if (mode == "base") {
+        beta_values = yaml_float_vector(yaml, "beta_base");
+        if (beta_values.empty()) beta_values = yaml_float_vector(yaml, "beta");
+        selected_columns = yaml_int_vector(yaml, "selected_columns");
+      } else if (mode == "full") {
+        beta_values = yaml_float_vector(yaml, "beta");
+      } else {
+        throw std::runtime_error("--params must contain mode full or base");
+      }
+    } else {
+      beta_values = load_beta_txt(beta_path);
+      if (urdf_path.empty()) urdf_path = example::urdf_arg(argc, argv);
+    }
+    if (beta_values.empty()) throw std::runtime_error("no beta values found");
+
+    rebotarm::RobotModel model(urdf_path);
     Dataset ds = load_csv(data_path, model.nv());
     const Eigen::MatrixXd Y = rebotarm::ident::build_regression_matrix(
         model, ds.q, ds.dq, ds.ddq, include_friction, coulomb_eps);
-    const auto beta_vec = load_beta_txt(beta_path);
-    Eigen::VectorXd beta(beta_vec.size());
-    for (int i = 0; i < beta.size(); ++i) beta[i] = beta_vec[i];
-    if (beta.size() != Y.cols()) throw std::runtime_error("beta length does not match regressor columns");
+    const Eigen::VectorXd beta = vector_to_eigen(beta_values);
 
     const Eigen::VectorXd tau = rebotarm::ident::stack_tau_samples(ds.tau);
-    const Eigen::VectorXd tau_pred = Y * beta;
+    Eigen::VectorXd tau_pred;
+    if (mode == "base") {
+      if (selected_columns.empty()) throw std::runtime_error("base params require selected_columns");
+      if (beta.size() != static_cast<int>(selected_columns.size())) {
+        throw std::runtime_error("base beta length does not match selected_columns");
+      }
+      Eigen::MatrixXd Y_selected(Y.rows(), selected_columns.size());
+      for (int i = 0; i < static_cast<int>(selected_columns.size()); ++i) {
+        if (selected_columns[i] < 0 || selected_columns[i] >= Y.cols()) {
+          throw std::runtime_error("selected column out of range");
+        }
+        Y_selected.col(i) = Y.col(selected_columns[i]);
+      }
+      tau_pred = Y_selected * beta;
+    } else {
+      if (beta.size() != Y.cols()) throw std::runtime_error("beta length does not match regressor columns");
+      tau_pred = Y * beta;
+    }
     const auto metrics = rebotarm::ident::regression_metrics(tau, tau_pred, model.nv());
     std::cout << "verify samples=" << ds.q.rows() << " rmse=" << metrics.rmse
               << " mae=" << metrics.mae << " max_abs=" << metrics.max_abs
