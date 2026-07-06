@@ -9,6 +9,7 @@
 
 use std::f32::consts::PI;
 use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 use motor_vendor_damiao::{ControlMode as DamiaoMode, DamiaoController, DamiaoMotor};
@@ -295,6 +296,8 @@ impl UniMotor {
         }
     }
 
+    // 保留以对齐 vendor API（RobotArm 的增益写入统一走 write_pos_vel_gains）。
+    #[allow(dead_code)]
     pub fn write_register_f32(&self, rid: u8, value: f32) -> Result<(), String> {
         match self {
             UniMotor::Damiao(m) => m.write_register_f32(rid, value).map_err(|e| e.to_string()),
@@ -309,6 +312,208 @@ impl UniMotor {
                 .map_err(|e| e.to_string()),
             _ => Err("寄存器读取仅 Damiao 支持".to_string()),
         }
+    }
+
+    // --------------------------------------------------------------
+    // POS_VEL 增益（按厂商派发）
+    // --------------------------------------------------------------
+
+    /// 写入 POS_VEL（位置-速度）模式的环路增益，按厂商映射到各自的寄存器/参数表。
+    /// 仅写入 > 0 的项，语义与 reBotArm_control_py 的 `_write_pv_params` 一致：
+    ///   - Damiao：寄存器 25(KP_ASR)/26(KI_ASR)/27(KP_APR)/28(KI_APR)
+    ///   - 灵足 RobStride：0x7017(limit_spd)=vlim、0x701F(spd_kp)、0x7020(spd_ki)、0x701E(loc_kp)
+    ///   - 其余厂商无对应参数表：no-op
+    pub fn write_pos_vel_gains(
+        &self,
+        vel_kp: f32,
+        vel_ki: f32,
+        pos_kp: f32,
+        pos_ki: f32,
+        vlim: f32,
+    ) -> Result<(), String> {
+        match self {
+            UniMotor::Damiao(m) => {
+                if vel_kp > 0.0 {
+                    m.write_register_f32(25, vel_kp).map_err(|e| e.to_string())?;
+                }
+                if vel_ki > 0.0 {
+                    m.write_register_f32(26, vel_ki).map_err(|e| e.to_string())?;
+                }
+                if pos_kp > 0.0 {
+                    m.write_register_f32(27, pos_kp).map_err(|e| e.to_string())?;
+                }
+                if pos_ki > 0.0 {
+                    m.write_register_f32(28, pos_ki).map_err(|e| e.to_string())?;
+                }
+                Ok(())
+            }
+            UniMotor::Robstride(m) => {
+                let write = |id: u16, v: f32| -> Result<(), String> {
+                    m.write_parameter(id, ParameterValue::F32(v))
+                        .map_err(|e| e.to_string())?;
+                    thread::sleep(Duration::from_millis(10));
+                    Ok(())
+                };
+                if vlim > 0.0 {
+                    write(0x7017, vlim)?; // limit_spd
+                }
+                if vel_kp > 0.0 {
+                    write(0x701F, vel_kp)?; // spd_kp
+                }
+                if vel_ki > 0.0 {
+                    write(0x7020, vel_ki)?; // spd_ki
+                }
+                if pos_kp > 0.0 {
+                    write(0x701E, pos_kp)?; // loc_kp
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        }
+    }
+
+    /// 读取 POS_VEL 模式环路增益 (vel_kp, vel_ki, pos_kp, pos_ki)。
+    ///   - Damiao：寄存器 25/26/27/28
+    ///   - 灵足 RobStride：0x701F(spd_kp)、0x7020(spd_ki)、0x701E(loc_kp)；无 pos_ki，返回 0.0
+    pub fn read_pos_vel_gains(&self, timeout_ms: u64) -> Result<(f32, f32, f32, f32), String> {
+        let timeout = Duration::from_millis(timeout_ms);
+        match self {
+            UniMotor::Damiao(m) => {
+                let vel_kp = m.get_register_f32(25, timeout).map_err(|e| e.to_string())?;
+                let vel_ki = m.get_register_f32(26, timeout).map_err(|e| e.to_string())?;
+                let pos_kp = m.get_register_f32(27, timeout).map_err(|e| e.to_string())?;
+                let pos_ki = m.get_register_f32(28, timeout).map_err(|e| e.to_string())?;
+                Ok((vel_kp, vel_ki, pos_kp, pos_ki))
+            }
+            UniMotor::Robstride(m) => {
+                let read = |id: u16| -> Result<f32, String> {
+                    m.get_parameter_f32(id, timeout).map_err(|e| e.to_string())
+                };
+                Ok((read(0x701F)?, read(0x7020)?, read(0x701E)?, 0.0))
+            }
+            _ => Err("read_pos_vel_gains 仅 Damiao / RobStride 支持".to_string()),
+        }
+    }
+
+    // --------------------------------------------------------------
+    // 通用辅助命令
+    // --------------------------------------------------------------
+
+    /// 清除电机错误状态（Damiao / 灵足 RobStride / HighTorque 支持）。
+    pub fn clear_error(&self) -> Result<(), String> {
+        match self {
+            UniMotor::Damiao(m) => m.clear_error().map_err(|e| e.to_string()),
+            UniMotor::Robstride(m) => m.clear_error().map_err(|e| e.to_string()),
+            UniMotor::Hightorque(m) => m.clear_error().map_err(|e| e.to_string()),
+            UniMotor::MyActuator(_) => Err("MyActuator 不支持 clear_error".to_string()),
+        }
+    }
+
+    // --------------------------------------------------------------
+    // 灵足（RobStride）底层专用接口 —— 镜像 motorbridge 的 robstride_* C ABI
+    // --------------------------------------------------------------
+
+    fn as_robstride(&self) -> Result<&Arc<RobstrideMotor>, String> {
+        match self {
+            UniMotor::Robstride(m) => Ok(m),
+            _ => Err("robstride_* 接口仅灵足（RobStride）电机支持".to_string()),
+        }
+    }
+
+    /// Ping 电机（type-0 GET_DEVICE_ID），返回 (device_id, responder_id)。
+    pub fn robstride_ping(&self, timeout_ms: u64) -> Result<(u8, u8), String> {
+        let reply = self
+            .as_robstride()?
+            .ping(Duration::from_millis(timeout_ms))
+            .map_err(|e| e.to_string())?;
+        Ok((reply.device_id, reply.responder_id))
+    }
+
+    /// 开/关电机主动上报（type-24 ACTIVE_REPORT）。
+    /// 灵足电机没有单帧状态查询命令，开启主动上报后 motorbridge 的后台轮询
+    /// 会持续更新状态缓存，get_state 才能拿到实时反馈。
+    pub fn robstride_set_active_report(&self, enabled: bool) -> Result<(), String> {
+        self.as_robstride()?
+            .set_active_report(enabled)
+            .map_err(|e| e.to_string())
+    }
+
+    /// 保存参数到电机（type-22 SAVE_PARAMETERS），断电后仍然生效。
+    pub fn robstride_save_parameters(&self) -> Result<(), String> {
+        self.as_robstride()?
+            .save_parameters()
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn robstride_write_param_f32(&self, param_id: u16, value: f32) -> Result<(), String> {
+        self.as_robstride()?
+            .write_parameter(param_id, ParameterValue::F32(value))
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn robstride_write_param_u8(&self, param_id: u16, value: u8) -> Result<(), String> {
+        self.as_robstride()?
+            .write_parameter(param_id, ParameterValue::U8(value))
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn robstride_write_param_u16(&self, param_id: u16, value: u16) -> Result<(), String> {
+        self.as_robstride()?
+            .write_parameter(param_id, ParameterValue::U16(value))
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn robstride_write_param_u32(&self, param_id: u16, value: u32) -> Result<(), String> {
+        self.as_robstride()?
+            .write_parameter(param_id, ParameterValue::U32(value))
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn robstride_get_param_f32(&self, param_id: u16, timeout_ms: u64) -> Result<f32, String> {
+        self.as_robstride()?
+            .get_parameter_f32(param_id, Duration::from_millis(timeout_ms))
+            .map_err(|e| e.to_string())
+    }
+
+    pub fn robstride_get_param_u8(&self, param_id: u16, timeout_ms: u64) -> Result<u8, String> {
+        match self
+            .as_robstride()?
+            .get_parameter(param_id, Duration::from_millis(timeout_ms))
+            .map_err(|e| e.to_string())?
+        {
+            ParameterValue::U8(v) => Ok(v),
+            other => Err(format!("参数 0x{param_id:04X} 不是 u8 类型: {other:?}")),
+        }
+    }
+
+    pub fn robstride_get_param_u16(&self, param_id: u16, timeout_ms: u64) -> Result<u16, String> {
+        match self
+            .as_robstride()?
+            .get_parameter(param_id, Duration::from_millis(timeout_ms))
+            .map_err(|e| e.to_string())?
+        {
+            ParameterValue::U16(v) => Ok(v),
+            other => Err(format!("参数 0x{param_id:04X} 不是 u16 类型: {other:?}")),
+        }
+    }
+
+    pub fn robstride_get_param_u32(&self, param_id: u16, timeout_ms: u64) -> Result<u32, String> {
+        match self
+            .as_robstride()?
+            .get_parameter(param_id, Duration::from_millis(timeout_ms))
+            .map_err(|e| e.to_string())?
+        {
+            ParameterValue::U32(v) => Ok(v),
+            other => Err(format!("参数 0x{param_id:04X} 不是 u32 类型: {other:?}")),
+        }
+    }
+
+    /// 灵足原生 CSP 位置模式（run_mode=5）：内部依次 set_mode(CSP)、enable、
+    /// 写 0x7017 limit_spd 与 0x7016 loc_ref。
+    pub fn robstride_send_pos_vel_csp(&self, pos: f32, vlim: f32) -> Result<(), String> {
+        self.as_robstride()?
+            .send_cmd_pos_vel_csp(pos, vlim)
+            .map_err(|e| e.to_string())
     }
 
     /// 设置电机侧 CAN 超时看门狗（ms）：超时未收到控制帧则电机自动停机。
@@ -394,6 +599,8 @@ impl UniMotor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use motor_core::bus::CanBus;
+    use motor_core::test_support::MockBus;
 
     #[test]
     fn mode_mapping() {
@@ -404,5 +611,94 @@ mod tests {
         assert!(validate_myactuator_mode(2).is_ok());
         assert!(validate_myactuator_mode(9).is_err());
         assert!(matches!(to_robstride_mode(5), Ok(RsMode::PositionCsp)));
+    }
+
+    fn mock_robstride() -> (Arc<MockBus>, UniMotor) {
+        let bus = Arc::new(MockBus::new());
+        let m = RobstrideMotor::new(1, 0xFD, "rs-06", bus.clone() as Arc<dyn CanBus>)
+            .expect("create robstride motor");
+        (bus, UniMotor::Robstride(Arc::new(m)))
+    }
+
+    fn mock_damiao() -> UniMotor {
+        let bus: Arc<dyn CanBus> = Arc::new(MockBus::new());
+        let m = DamiaoMotor::new(0x01, 0x11, "4310", bus).expect("create damiao motor");
+        UniMotor::Damiao(Arc::new(m))
+    }
+
+    #[test]
+    fn robstride_param_write_sends_write_parameter_frames() {
+        let (bus, motor) = mock_robstride();
+        motor
+            .robstride_write_param_f32(0x7016, 1.25)
+            .expect("write loc_ref");
+        motor
+            .robstride_write_param_u8(0x7029, 1)
+            .expect("write zero_sta");
+        let sent = bus.sent.lock().expect("sent frames");
+        assert_eq!(sent.len(), 2);
+        for frame in sent.iter() {
+            // 通信类型 18 = WRITE_PARAMETER，见 robstride/protocol.rs
+            assert_eq!((frame.arbitration_id >> 24) & 0x1F, 18);
+            assert!(frame.is_extended);
+        }
+        assert_eq!(u16::from_le_bytes([sent[0].data[0], sent[0].data[1]]), 0x7016);
+        assert_eq!(
+            f32::from_le_bytes([sent[0].data[4], sent[0].data[5], sent[0].data[6], sent[0].data[7]]),
+            1.25
+        );
+    }
+
+    #[test]
+    fn robstride_pv_gains_map_to_parameter_table() {
+        let (bus, motor) = mock_robstride();
+        motor
+            .write_pos_vel_gains(12.0, 0.1, 13.0, 0.0, 10.0)
+            .expect("write pv gains");
+        let sent = bus.sent.lock().expect("sent frames");
+        // vlim + vel_kp + vel_ki + pos_kp（pos_ki 灵足无对应参数，不发送）
+        let ids: Vec<u16> = sent
+            .iter()
+            .map(|f| u16::from_le_bytes([f.data[0], f.data[1]]))
+            .collect();
+        assert_eq!(ids, vec![0x7017, 0x701F, 0x7020, 0x701E]);
+    }
+
+    #[test]
+    fn robstride_pv_gains_skip_non_positive_values() {
+        let (bus, motor) = mock_robstride();
+        motor
+            .write_pos_vel_gains(0.0, 0.0, 0.0, 0.0, 0.0)
+            .expect("no-op gains");
+        assert!(bus.sent.lock().expect("sent frames").is_empty());
+    }
+
+    #[test]
+    fn robstride_helpers_reject_other_vendors() {
+        let motor = mock_damiao();
+        assert!(motor.robstride_write_param_f32(0x7016, 0.0).is_err());
+        assert!(motor.robstride_get_param_f32(0x7019, 10).is_err());
+        assert!(motor.robstride_set_active_report(true).is_err());
+        assert!(motor.robstride_save_parameters().is_err());
+        assert!(motor.robstride_send_pos_vel_csp(0.0, 1.0).is_err());
+        assert!(motor.robstride_ping(10).is_err());
+    }
+
+    #[test]
+    fn robstride_get_param_times_out_without_reply() {
+        let (_bus, motor) = mock_robstride();
+        assert!(motor.robstride_get_param_f32(0x7019, 5).is_err());
+    }
+
+    #[test]
+    fn clear_error_dispatch() {
+        let (bus, motor) = mock_robstride();
+        // 灵足 clear_error 走 DISABLE(type-4) + data[0]=1，等待状态 ACK 会超时，
+        // 但帧必须已发出。
+        let _ = motor.clear_error();
+        let sent = bus.sent.lock().expect("sent frames");
+        assert!(!sent.is_empty());
+        assert_eq!((sent[0].arbitration_id >> 24) & 0x1F, 4);
+        assert_eq!(sent[0].data[0], 1);
     }
 }

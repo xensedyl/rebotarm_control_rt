@@ -31,6 +31,10 @@ motor_vendor_myactuator = { path = "../motorbridge/motor_vendors/myactuator" }
 motor_vendor_robstride = { path = "../motorbridge/motor_vendors/robstride" }
 motor_vendor_hightorque = { path = "../motorbridge/motor_vendors/hightorque" }
 
+[dev-dependencies]
+# 单元测试用 MockBus（无需真实 CAN 总线）
+motor_core = { path = "../motorbridge/motor_core", features = ["test-support"] }
+
 [profile.release]
 opt-level = 3
 lto = "thin"
