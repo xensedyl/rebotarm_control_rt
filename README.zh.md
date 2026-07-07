@@ -161,9 +161,45 @@ with ArmEndPos(arm) as ep:
 ## 厂商支持（actuator）
 
 - **Damiao** —— 主路径，串口桥 `/dev/tty*` 921600。
-- **MyActuator / RobStride / HighTorque** —— CAN。
+- **灵足（RobStride）** —— CAN，底层完整支持（见下）。
+- **MyActuator / HighTorque** —— CAN。
 
 状态归一化、模式映射、控制指令派发均与 `motor_abi` 的 C-ABI 实现保持一致。
+
+### 灵足（RobStride）电机
+
+随包提供灵足机械臂配置 `config/arm_rs.yaml` 与夹爪配置 `config/gripper_rs.yaml`
+（参数参考 `reBotArm_control_py` 的 `rebotarm_rs.yaml`）：
+
+```python
+from rebotarm_control_rt.actuator import RobotArm
+
+arm = RobotArm("python/rebotarm_control_rt/config/arm_rs.yaml")
+arm.connect(); arm.enable()
+
+# 灵足无单帧状态查询命令，开启主动上报后 get_state 才有持续反馈
+for name in arm.joint_names:
+    arm.robstride_set_active_report(name, True)
+
+# MIT / POS_VEL / VEL 与达妙同一套接口；mode_pos_vel 会把 YAML 增益写入
+# 灵足参数表（0x7017 limit_spd / 0x701F spd_kp / 0x7020 spd_ki / 0x701E loc_kp）
+arm.mode_pos_vel()
+arm.start_rt_loop(rate=150.0)
+```
+
+底层专用接口（与 motorbridge Python binding 的 `robstride_*` 方法对应）：
+
+| 接口 | 说明 |
+|---|---|
+| `robstride_ping(name)` | ping 电机，返回 `(device_id, responder_id)` |
+| `clear_error(name)` | 清除故障（Damiao / 灵足 / HighTorque 通用） |
+| `robstride_set_active_report(name, enabled)` | 开/关主动状态上报（type-24） |
+| `robstride_write_param_{f32,u8,u16,u32}(name, id, value)` | 写 0x7000 参数表（type-18） |
+| `robstride_get_param_{f32,u8,u16,u32}(name, id)` | 读参数（type-17），如 `0x7019 mechPos` |
+| `robstride_save_parameters(name)` | 参数断电保存（type-22） |
+| `robstride_pos_vel_csp(name, pos, vlim)` | 灵足原生 CSP 位置模式（run_mode=5）单关节控制 |
+
+交互调试示例：`example/python/0x03robstride_test.py`（用法见 example/python/README.zh.md）。
 
 ## 致谢
 
