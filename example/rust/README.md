@@ -40,6 +40,10 @@ example/rust/
         ├── 8_arm_traj_control.rs
         ├── 9_gravity_compensation.rs
         ├── 10_gravity_compensation_lock.rs
+        ├── 11_record_gravity_trajectory.rs
+        ├── 12_collect_identification_data.rs
+        ├── 13_identify_dynamics.rs
+        ├── 14_verify_identification.rs
         ├── gripper_test.rs
         └── read_damiao_pd.rs
 ```
@@ -343,6 +347,211 @@ Interactive commands:
 | `posvel <deg> [vlim]` | POS_VEL target |
 | `state` | Print arm and gripper state |
 | `q` | Stop and disconnect |
+
+## Dynamics Identification
+
+The recommended workflow is to record a trajectory by hand while gravity compensation is running,
+then replay that real checked trajectory in POS_VEL mode to collect `q/dq/ddq/tau`. This is safer
+than generating random offline excitation trajectories.
+
+`11_record_gravity_trajectory.rs` enters gravity compensation immediately. Move the arm to a good
+start pose, press Enter to start recording, press Enter again to stop and save, then move the arm
+back to zero or a safe pose while gravity compensation is still active. Press `Ctrl+C` to exit.
+If the arm sinks, increase `--gravity-scale` slightly; if it floats upward, decrease it slightly.
+
+The identification CSV format is:
+
+```text
+time,q1,q2,q3,q4,q5,q6,dq1,...,dq6,ddq1,...,ddq6,tau1,...,tau6
+```
+
+Units are rad, rad/s, rad/s^2, and Nm.
+
+### Option A: Arm First, Then Arm With Gripper
+
+Use this when you want to separate the arm body from the new gripper. In the first stage, remove the
+gripper or make sure the arm has no extra payload. In the second stage, mount the new gripper and fit
+only the `end_link` payload.
+
+#### A1. Record the Arm-Only Trajectory
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 11_record_gravity_trajectory -- \
+  --output calibration/arm_only_trajectory.csv \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0 \
+  --use_gripper=false
+```
+
+#### A2. Preview the Arm-Only Trajectory
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/arm_only_trajectory.csv \
+  --output calibration/id_data_arm_only.csv \
+  --port /dev/ttyACM0
+```
+
+#### A3. Replay and Collect Arm-Only Data
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/arm_only_trajectory.csv \
+  --output calibration/id_data_arm_only.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### A4. Identify the Arm Body
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 13_identify_dynamics -- \
+  --data calibration/id_data_arm_only.csv \
+  --mode full \
+  --ignore-payload-link end_link \
+  --output calibration/identified_arm_rust.yaml \
+  --urdf-output calibration/identified_arm_rust.urdf
+```
+
+`--ignore-payload-link end_link` temporarily removes the `end_link` inertial during identification
+so stale gripper parameters do not pollute the arm-body result.
+
+#### A5. Mount the New Gripper and Record a Trajectory
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 11_record_gravity_trajectory -- \
+  --output calibration/arm_with_gripper_trajectory.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0
+```
+
+#### A6. Preview the Arm-With-Gripper Trajectory
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/arm_with_gripper_trajectory.csv \
+  --output calibration/id_data_arm_with_gripper.csv \
+  --port /dev/ttyACM0
+```
+
+#### A7. Replay and Collect Arm-With-Gripper Data
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/arm_with_gripper_trajectory.csv \
+  --output calibration/id_data_arm_with_gripper.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### A8. Identify Only the Gripper Payload
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 13_identify_dynamics -- \
+  --data calibration/id_data_arm_with_gripper.csv \
+  --urdf calibration/identified_arm_rust.urdf \
+  --mode payload \
+  --payload-link end_link \
+  --payload-parameters 4 \
+  --output calibration/identified_gripper_payload_rust.yaml \
+  --urdf-output calibration/identified_arm_with_gripper_rust.urdf
+```
+
+If the trajectory has enough velocity and acceleration excitation, you can change
+`--payload-parameters 4` to `--payload-parameters 10`. Four parameters fit only mass and COM and
+are usually better for improving gravity compensation first; ten parameters also fit inertia but
+are more sensitive to data quality.
+
+#### A9. Test Gravity Compensation With the Identified URDF
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 9_gravity_compensation -- \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_arm_with_gripper_rust.urdf
+```
+
+### Option B: Identify Arm and Gripper Together
+
+Use this faster workflow when you believe both the arm and gripper parameters are inaccurate and you
+accept the coupling between `link6` and fixed `end_link`. It gives a fitted overall model, but the
+physical parameter split is not necessarily unique.
+
+#### B1. Record the Arm-With-Gripper Trajectory
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 11_record_gravity_trajectory -- \
+  --output calibration/all_with_gripper_trajectory.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0
+```
+
+#### B2. Preview the Trajectory
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/all_with_gripper_trajectory.csv \
+  --output calibration/id_data_all_with_gripper.csv \
+  --port /dev/ttyACM0
+```
+
+#### B3. Replay and Collect Data
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 12_collect_identification_data -- \
+  --trajectory calibration/all_with_gripper_trajectory.csv \
+  --output calibration/id_data_all_with_gripper.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### B4. Identify Arm and Gripper Together
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 13_identify_dynamics -- \
+  --data calibration/id_data_all_with_gripper.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --mode full \
+  --output calibration/identified_dynamics_all_rust.yaml \
+  --urdf-output calibration/identified_dynamics_all_rust.urdf
+```
+
+For full-model URDF write-back, the Rust example folds fixed-child inertials into the corresponding
+movable child link and removes the fixed child inertial blocks.
+
+#### B5. Test Gravity Compensation With the Overall URDF
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 9_gravity_compensation -- \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_dynamics_all_rust.urdf
+```
+
+Use `--mode base` to fit a QR-selected independent parameter set. Base parameters cannot be written
+back to URDF uniquely.
+
+`14_verify_identification.rs` supports only `full/base` results. If you have a separate verification
+dataset, use it for workflow B or the arm-only part of workflow A:
+
+```bash
+cargo run --manifest-path example/rust/Cargo.toml --bin 14_verify_identification -- \
+  --data calibration/id_data_verify.csv \
+  --params calibration/identified_dynamics_all_rust.yaml
+```
 
 ## Build Check
 

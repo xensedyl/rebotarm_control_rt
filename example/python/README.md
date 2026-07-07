@@ -368,6 +368,221 @@ Free-drive tuning:
 | `--gravity-scale` | Multiplier for gravity feed-forward torque, `tau = gravity_scale * g(q)`. Start from `1.0`; increase slightly if the arm sinks, decrease slightly if it floats upward. Use small steps such as `0.02` to `0.05`. |
 | `--kd` | MIT damping during free-drive. Larger values feel more damped and less loose; smaller values feel lighter but may oscillate. |
 
+## Dynamics Identification
+
+The recommended workflow is to record a hand-guided trajectory under gravity compensation, then
+replay that real trajectory in POS_VEL mode while collecting `q/dq/ddq/tau`. The operator has already
+checked the path in the real scene, which is safer than replaying an offline random excitation.
+
+`11_record_gravity_trajectory.py` starts gravity-compensated free-drive. Drag the arm to a good start
+pose, press Enter to start recording, press Enter again to stop and save, then drag the arm back to
+zero or another safe pose. Press `Ctrl+C` only when you are ready to disconnect. If the arm sinks,
+increase `--gravity-scale` slightly; if it floats upward, decrease it slightly.
+
+The identification CSV columns are:
+
+```text
+time,q1,q2,q3,q4,q5,q6,dq1,...,dq6,ddq1,...,ddq6,tau1,...,tau6
+```
+
+Units are radians, radians per second, radians per second squared, and Nm. Use one of the complete
+workflows below.
+
+### Workflow A: arm first, then arm plus gripper
+
+Use this workflow when you want to separate the arm body parameters from the newly mounted gripper as
+much as possible. The first stage records the arm without extra end load; the second stage mounts the
+new gripper and identifies only the fixed `end_link` payload. This is the preferred workflow for
+improving gravity-compensation feel.
+
+#### A1. Record the arm-only trajectory
+
+```bash
+python example/python/11_record_gravity_trajectory.py \
+  --output calibration/arm_only_trajectory.csv \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0 \
+  --use_gripper=false
+```
+
+#### A2. Preview the arm-only replay
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/arm_only_trajectory.csv \
+  --output calibration/id_data_arm_only.csv \
+  --port /dev/ttyACM0
+```
+
+#### A3. Replay and collect arm-only data
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/arm_only_trajectory.csv \
+  --output calibration/id_data_arm_only.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### A4. Identify the arm body
+
+```bash
+python example/python/13_identify_dynamics.py \
+  --data calibration/id_data_arm_only.csv \
+  --mode full \
+  --ignore-payload-link end_link \
+  --output calibration/identified_arm.yaml \
+  --urdf-output calibration/identified_arm.urdf
+```
+
+`--ignore-payload-link end_link` removes the fixed `end_link` inertial from a temporary URDF during
+the fit, so stale gripper parameters do not contaminate the arm-only result.
+
+#### A5. Mount the new gripper and record a trajectory
+
+```bash
+python example/python/11_record_gravity_trajectory.py \
+  --output calibration/arm_with_gripper_trajectory.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0
+```
+
+#### A6. Preview the arm-with-gripper replay
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/arm_with_gripper_trajectory.csv \
+  --output calibration/id_data_arm_with_gripper.csv \
+  --port /dev/ttyACM0
+```
+
+#### A7. Replay and collect arm-with-gripper data
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/arm_with_gripper_trajectory.csv \
+  --output calibration/id_data_arm_with_gripper.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### A8. Identify only the gripper payload
+
+```bash
+python example/python/13_identify_dynamics.py \
+  --data calibration/id_data_arm_with_gripper.csv \
+  --urdf calibration/identified_arm.urdf \
+  --mode payload \
+  --payload-link end_link \
+  --payload-parameters 4 \
+  --output calibration/identified_gripper_payload.yaml \
+  --urdf-output calibration/identified_arm_with_gripper.urdf
+```
+
+If the trajectory contains enough velocity and acceleration excitation, you can change
+`--payload-parameters 4` to `--payload-parameters 10`. Four parameters fit only mass and center of
+mass, which is usually the best first step for gravity compensation. Ten parameters fit the full
+inertial block and are more sensitive to data quality.
+
+#### A9. Test gravity compensation with the identified URDF
+
+```bash
+python example/python/9_gravity_compensation.py \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_arm_with_gripper.urdf
+```
+
+### Workflow B: identify arm and gripper together
+
+Use this faster workflow when you believe both the arm and gripper are wrong and you accept strong
+coupling between `link6` and the fixed `end_link` payload. It produces one fitted overall model, but
+the physical split of parameters is not unique.
+
+#### B1. Record the arm-with-gripper trajectory
+
+```bash
+python example/python/11_record_gravity_trajectory.py \
+  --output calibration/all_with_gripper_trajectory.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0
+```
+
+#### B2. Preview the replay
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/all_with_gripper_trajectory.csv \
+  --output calibration/id_data_all_with_gripper.csv \
+  --port /dev/ttyACM0
+```
+
+#### B3. Replay and collect data
+
+```bash
+python example/python/12_collect_identification_data.py \
+  --trajectory calibration/all_with_gripper_trajectory.csv \
+  --output calibration/id_data_all_with_gripper.csv \
+  --port /dev/ttyACM0 \
+  --execute
+```
+
+#### B4. Identify arm and gripper together
+
+```bash
+python example/python/13_identify_dynamics.py \
+  --data calibration/id_data_all_with_gripper.csv \
+  --urdf calibration/tool_calibration.urdf \
+  --mode full \
+  --output calibration/identified_dynamics_all.yaml \
+  --urdf-output calibration/identified_dynamics_all.urdf
+```
+
+#### B5. Test gravity compensation with the identified overall URDF
+
+```bash
+python example/python/9_gravity_compensation.py \
+  --port /dev/ttyACM0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_dynamics_all.urdf
+```
+
+Important options:
+
+| Option | Description |
+|---|---|
+| `--mode full` | Fit the full arm+gripper dynamic parameter vector and allow URDF inertial write-back. |
+| `--mode base` | Fit an independent QR-selected base parameter set. This is often more numerically stable, but it cannot be uniquely written back to URDF. |
+| `--mode payload` | Keep the arm URDF fixed and identify one fixed payload link, defaulting to `end_link`. This is the second step of workflow A. |
+| `--urdf-output` | Write a copy of the input URDF with identified inertial parameters. Supported by `full` and `payload`; `base` cannot be uniquely written to URDF. |
+| `--payload-parameters 4` | Fit only gripper mass and center of mass; recommended first for gravity compensation. |
+| `--payload-parameters 10` | Fit the full 10-parameter gripper inertial block; requires richer dynamic excitation. |
+| `--ignore-payload-link end_link` | Temporarily ignore the fixed end payload during arm-only identification. |
+| `--no-friction` | Fit only rigid-body inertial parameters. By default viscous and smooth Coulomb friction columns are included. |
+| `--no-model-prior` | In full mode, solve a pure minimum-norm least-squares problem. By default the unidentifiable null-space stays close to the input URDF before writing back inertials. |
+
+`14_verify_identification.py` supports only `full/base` results. If you have a separate verification
+dataset, use it for workflow B or the arm-only part of workflow A:
+
+```bash
+python example/python/14_verify_identification.py \
+  --data calibration/id_data_verify.csv \
+  --params calibration/identified_dynamics_all.yaml
+```
+
 ## MeshCat Simulation
 
 Optional simulation examples live under `example/python/sim/`. They require Python `meshcat` and
