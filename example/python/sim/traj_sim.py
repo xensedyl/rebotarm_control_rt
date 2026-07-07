@@ -2,6 +2,7 @@
 """Cartesian target trajectory simulation with MeshCat playback."""
 from __future__ import annotations
 
+import argparse
 import math
 import sys
 import time
@@ -23,6 +24,7 @@ from rebotarm_control_rt.trajectory import (
     compute_traj_stats,
     plan_joint_space_trajectory,
 )
+from _example_config import model_urdf_for_config
 from sim.visualizer import Visualizer
 
 LINEAR_SPEED = 0.1
@@ -105,8 +107,13 @@ def run_trajectory(viz: Visualizer, model, frame_id: int, q_start: np.ndarray, q
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--urdf", default=None, help="URDF path. Defaults to the config URDF or SDK URDF.")
+    args = parser.parse_args()
+
     print("loading MeshCat visualizer...")
-    viz = Visualizer(open_browser=True)
+    viz = Visualizer(open_browser=True, urdf_path=model_urdf_for_config(args.config, args.urdf))
     model = viz.model
     frame_id = model.end_effector_frame_id()
     q_last = model.neutral()

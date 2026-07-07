@@ -2,6 +2,7 @@
 """Forward-kinematics MeshCat simulation."""
 from __future__ import annotations
 
+import argparse
 import math
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ for path in (REPO_ROOT, EXAMPLE_PYTHON_ROOT):
         sys.path.insert(0, str(path))
 
 from rebotarm_control_rt.kinematics import compute_fk
+from _example_config import model_urdf_for_config
 from sim.visualizer import Visualizer
 
 def matrix_to_rpy_xyz(rot: np.ndarray) -> np.ndarray:
@@ -31,8 +33,13 @@ def matrix_to_rpy_xyz(rot: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--urdf", default=None, help="URDF path. Defaults to the config URDF or SDK URDF.")
+    args = parser.parse_args()
+
     print("loading visualizer...")
-    viz = Visualizer()
+    viz = Visualizer(urdf_path=model_urdf_for_config(args.config, args.urdf))
     q = np.zeros(viz.nq)
     viz.update(q)
 

@@ -40,13 +40,18 @@ except (ModuleNotFoundError, ImportError) as exc:  # pragma: no cover - optional
     ) from exc
 
 from rebotarm_control_rt.kinematics import _URDF, compute_fk, load_robot_model
+from rebotarm_control_rt.paths import resolve_urdf_path
 
 
-def _mesh_resolved_urdf() -> str:
-    src = Path(_URDF)
+def _mesh_resolved_urdf(urdf_path: str | Path | None = None) -> str:
+    src = resolve_urdf_path(urdf_path)
     text = src.read_text(encoding="utf-8")
     text = text.replace(
         "package://reBot-DevArm_description_fixend/",
+        f"file://{src.parents[1]}/",
+    )
+    text = text.replace(
+        "package://reBot-DevArm_description/",
         f"file://{src.parents[1]}/",
     )
     tmp = tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False, encoding="utf-8")
@@ -56,14 +61,15 @@ def _mesh_resolved_urdf() -> str:
 
 
 class Visualizer:
-    def __init__(self, open_browser: bool = True) -> None:
-        urdf_path = _mesh_resolved_urdf()
+    def __init__(self, open_browser: bool = True, urdf_path: str | Path | None = None) -> None:
+        source_urdf = str(resolve_urdf_path(urdf_path))
+        mesh_urdf = _mesh_resolved_urdf(source_urdf)
 
-        self._rt_model = load_robot_model()
-        self._model = pin.buildModelFromUrdf(urdf_path)
+        self._rt_model = load_robot_model(source_urdf)
+        self._model = pin.buildModelFromUrdf(mesh_urdf)
         self._data = self._model.createData()
         self._visual_model = pin.buildGeomFromUrdf(
-            self._model, urdf_path, pin.GeometryType.VISUAL
+            self._model, mesh_urdf, pin.GeometryType.VISUAL
         )
         self._visual_data = self._visual_model.createData()
         self._meshcat_viz = meshcat.Visualizer(zmq_url=None)

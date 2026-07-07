@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import numpy as np
@@ -25,9 +26,9 @@ from rebotarm_control_rt.calibration import (
     tool_axis_from_pose,
     urdf_joint_origin_matrix,
 )
-from rebotarm_control_rt.kinematics import _URDF, load_robot_model
-from rebotarm_control_rt.paths import default_calibration_dir
-from _example_config import add_port_argument, config_with_port
+from rebotarm_control_rt.kinematics import load_robot_model
+from rebotarm_control_rt.paths import default_calibration_dir, resolve_urdf_path
+from _example_config import add_port_argument, config_with_port, model_urdf_for_config
 
 
 def _wait_enter(prompt: str) -> bool:
@@ -69,6 +70,25 @@ def _save_yaml(path: Path, transform: np.ndarray, residuals: dict[str, float], f
     path.write_text(yaml.safe_dump(payload, sort_keys=False, allow_unicode=True), encoding="utf-8")
 
 
+def _joint_exists(urdf_path: str | Path, joint_name: str) -> bool:
+    root = ET.parse(resolve_urdf_path(urdf_path)).getroot()
+    return root.find(f"./joint[@name='{joint_name}']") is not None
+
+
+def _default_urdf_joint(urdf_path: str | Path, frame: str) -> str:
+    root = ET.parse(resolve_urdf_path(urdf_path)).getroot()
+    for name in ("end_joint", "j_gripper_end"):
+        if root.find(f"./joint[@name='{name}']") is not None:
+            return name
+    for joint in root.findall("./joint"):
+        if joint.attrib.get("type") != "fixed":
+            continue
+        parent = joint.find("parent")
+        if parent is not None and parent.attrib.get("link") == frame:
+            return str(joint.attrib.get("name"))
+    raise ValueError(f"no fixed TCP joint found in {resolve_urdf_path(urdf_path)}; pass --urdf-joint")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
@@ -80,13 +100,13 @@ def main() -> None:
     parser.add_argument("--gravity-scale", type=float, default=1.0, help="Gravity torque scale.")
     default_output = default_calibration_dir() / "tool_calibration.yaml"
     parser.add_argument("--output", default=str(default_output), help="Output YAML path.")
-    parser.add_argument("--urdf-input", default=_URDF, help="Input URDF to copy and update.")
+    parser.add_argument("--urdf-input", default=None, help="Input URDF to copy and update. Defaults to the config URDF or SDK URDF.")
     parser.add_argument(
         "--urdf-output",
         default=None,
         help="Output calibrated URDF path. Defaults to --output with .urdf suffix.",
     )
-    parser.add_argument("--urdf-joint", default="end_joint", help="Fixed joint to update in the URDF.")
+    parser.add_argument("--urdf-joint", default=None, help="Fixed joint to update in the URDF.")
     parser.add_argument(
         "--calibrate-orientation",
         action="store_true",
@@ -97,7 +117,13 @@ def main() -> None:
     if args.samples < 4:
         raise ValueError("--samples must be at least 4")
 
-    model = load_robot_model()
+    urdf_input = model_urdf_for_config(args.config, args.urdf_input)
+    urdf_input = str(resolve_urdf_path(urdf_input))
+    urdf_joint = args.urdf_joint or _default_urdf_joint(urdf_input, args.frame)
+    if not _joint_exists(urdf_input, urdf_joint):
+        raise ValueError(f"joint {urdf_joint!r} not found in {urdf_input}")
+
+    model = load_robot_model(urdf_input)
     frames = model.all_frame_names()
     if args.frame not in frames:
         raise ValueError(f"unknown frame {args.frame!r}; available frames include: {frames}")
@@ -141,7 +167,7 @@ def main() -> None:
             _print_pose_summary(f"captured touch {idx + 1}", pose)
 
         u, world_point, res_max_mm, res_mean_mm = solve_tcp_position(touch_poses)
-        transform = urdf_joint_origin_matrix(args.urdf_input, joint_name=args.urdf_joint)
+        transform = urdf_joint_origin_matrix(urdf_input, joint_name=urdf_joint)
         transform[:3, 3] = u
         residuals = {"max": res_max_mm, "mean": res_mean_mm, "mode": "position_only"}
         preserve_urdf_rpy = True
@@ -176,15 +202,15 @@ def main() -> None:
                 print(f"\n[orientation] failed: {exc}")
                 print("[orientation] saved position-only calibration instead. Re-run with a real +X direction pose if orientation is needed.")
         else:
-            print("\n[orientation] skipped. Keeping the existing URDF end_joint orientation and updating TCP translation only.")
+            print(f"\n[orientation] skipped. Keeping the existing URDF {urdf_joint} orientation and updating TCP translation only.")
 
         xyz_m, rpy_deg = matrix_to_xyz_rpy_deg(transform)
         _save_yaml(output, transform, residuals, args.frame)
         apply_tool_to_urdf(
-            args.urdf_input,
+            urdf_input,
             transform,
             urdf_output,
-            joint_name=args.urdf_joint,
+            joint_name=urdf_joint,
             preserve_rpy=preserve_urdf_rpy,
         )
 
@@ -199,7 +225,7 @@ def main() -> None:
             print("   ", " ".join(f"{float(v):+.8f}" for v in row))
         print(f"\n[saved] {output}")
         print(f"[saved] {urdf_output}")
-        print("\nUse the generated URDF when loading RobotModel so end_link becomes the new TCP.")
+        print("\nUse the generated URDF when loading RobotModel so the calibrated fixed joint becomes the TCP.")
         print("\n[free-drive] Calibration is saved; gravity compensation is still running.")
         print("[free-drive] Press Ctrl+C to disable motors, disconnect, and exit.")
         while True:

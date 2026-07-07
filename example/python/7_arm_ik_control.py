@@ -24,18 +24,20 @@ if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
 from rebotarm_control_rt.actuator import RobotArm
 from rebotarm_control_rt.controllers import ArmEndPos
 from rebotarm_control_rt.kinematics import joint_to_pose, load_robot_model
-from _example_config import add_port_argument, config_with_port
+from _example_config import add_port_argument, config_with_port, model_urdf_for_config
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--urdf", default=None, help="URDF path. Defaults to the config URDF or SDK URDF.")
     add_port_argument(parser)
     args = parser.parse_args()
 
+    model_urdf = model_urdf_for_config(args.config, args.urdf)
     arm = RobotArm(config_with_port(args.config, args.port))
-    arm_endpos_control = ArmEndPos(arm)
-    model = load_robot_model()
+    arm_endpos_control = ArmEndPos(arm, urdf_path=model_urdf)
+    model = load_robot_model(model_urdf)
 
     arm_endpos_control.start()
     print("--- 已启动末端位置控制器 ---\n")

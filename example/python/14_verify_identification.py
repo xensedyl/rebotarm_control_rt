@@ -18,17 +18,19 @@ from rebotarm_control_rt.identification import (
     load_model_for_identification,
     stack_tau_samples,
 )
+from _example_config import model_urdf_for_config
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", required=True, help="Verification CSV.")
     parser.add_argument("--params", required=True, help="YAML produced by 13_identify_dynamics.py.")
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
     parser.add_argument("--urdf", default=None, help="URDF used to build the regressor. Defaults to YAML input_urdf.")
     args = parser.parse_args()
 
     result = load_identification_result(args.params)
-    urdf = args.urdf or result.get("input_urdf")
+    urdf = args.urdf or result.get("input_urdf") or model_urdf_for_config(args.config)
     model = load_model_for_identification(urdf)
     dataset = load_identification_csv(args.data)
     Y = build_regression_matrix(

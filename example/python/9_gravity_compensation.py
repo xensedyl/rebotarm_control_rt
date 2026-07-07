@@ -34,7 +34,7 @@ from rebotarm_control_rt.dynamics import (
     load_dynamics_model,
 )
 from rebotarm_control_rt.paths import resolve_urdf_path
-from _example_config import add_port_argument, config_with_port
+from _example_config import add_port_argument, config_with_port, model_urdf_for_config
 
 
 _running = True
@@ -86,6 +86,12 @@ def _end_link_load_urdf(urdf_path: str | Path | None, scale: float) -> str:
     return tmp.name
 
 
+def _has_end_link_inertial(urdf_path: str | Path | None) -> bool:
+    root = ET.parse(resolve_urdf_path(urdf_path)).getroot()
+    end_link = root.find("./link[@name='end_link']")
+    return end_link is not None and end_link.find("inertial") is not None
+
+
 def _default_end_link_load_scale(use_gripper: bool, urdf_path: str | Path | None) -> float:
     if not use_gripper:
         return 0.0
@@ -98,6 +104,8 @@ def _load_gravity_model(urdf_path: str | Path | None, use_gripper: bool, end_lin
     scale = _default_end_link_load_scale(use_gripper, urdf_path) if end_link_load_scale is None else end_link_load_scale
     if scale == 1.0:
         return load_dynamics_model(None if urdf_path is None else str(urdf_path)), scale
+    if not _has_end_link_inertial(urdf_path):
+        return load_dynamics_model(None if urdf_path is None else str(urdf_path)), 1.0
     tmp_urdf = _end_link_load_urdf(urdf_path, scale)
     try:
         return load_dynamics_model(tmp_urdf), scale
@@ -181,7 +189,7 @@ def main() -> None:
     parser.add_argument(
         "--urdf",
         default=None,
-        help="Dynamics URDF used for gravity compensation. Defaults to the SDK URDF.",
+        help="Dynamics URDF used for gravity compensation. Defaults to the config URDF or SDK URDF.",
     )
     add_port_argument(parser)
     parser.add_argument("--rate", type=float, default=None, help="Python callback loop rate in Hz.")
@@ -212,11 +220,12 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, _sigint_handler)
 
-    model, end_link_scale = _load_gravity_model(args.urdf, args.use_gripper, args.end_link_load_scale)
+    model_urdf = model_urdf_for_config(args.config, args.urdf)
+    model, end_link_scale = _load_gravity_model(model_urdf, args.use_gripper, args.end_link_load_scale)
     print("=" * 60)
     print("  reBotArm RT gravity-compensation demo")
     print("=" * 60)
-    print(f"[urdf] {resolve_urdf_path(args.urdf)}")
+    print(f"[urdf] {resolve_urdf_path(model_urdf)}")
     print(f"[model] nq={model.nq}, nv={model.nv}")
     print(f"[gravity] {get_default_gravity()} m/s^2")
     print(f"[gripper/end_link load] scale={end_link_scale:.3f}")

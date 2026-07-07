@@ -36,11 +36,21 @@ sudo chmod 666 /dev/ttyACM*
 `python/rebotarm_control_rt/config/arm.yaml` 和 `gripper.yaml`：
 `channel: /dev/ttyACM0`。
 
-SocketCAN 使用前：
+灵足 / RobStride 通过 PCAN-USB 接入时，先按 1 Mbps 启动 SocketCAN，并使用
+RobStride YAML 配置：
 
 ```bash
-sudo ip link set can0 up type can bitrate 500000
+sudo modprobe peak_usb
+ip -br link
+
+sudo ip link set can0 down 2>/dev/null || true
+sudo ip link set can0 type can bitrate 1000000 restart-ms 100
+sudo ip link set can0 up
 ```
+
+灵足机械臂真机示例统一传 `--config python/rebotarm_control_rt/config/arm_rs.yaml --port can0`。灵足夹爪示例传
+`--config python/rebotarm_control_rt/config/gripper_rs.yaml --port can0`。运动学和仿真示例不需要 `--port`，但如果要使用
+灵足 URDF 和 `gripper_end` 末端 frame，仍然传 `--config python/rebotarm_control_rt/config/arm_rs.yaml`。
 
 ## 调试工具
 
@@ -67,6 +77,46 @@ python example/python/1_damiao_text.py --port /dev/ttyACM0 --joint joint1
 | `state` | 打印选中关节的位置、速度、力矩 |
 | `q` | 停止并断开 |
 
+### 1b. 灵足（RobStride）单电机控制台
+
+`0x03robstride_test.py` 是单关节终端的灵足（RobStride）版本。默认加载随包的
+`arm_rs.yaml`（灵足电机 + CAN 总线），启动时自动开启主动状态上报以获得持续反馈，
+并在常规 MIT / POS_VEL / VEL 控制之外提供灵足底层命令。
+
+```bash
+python example/python/0x03robstride_test.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0 --joint joint1
+```
+
+首次小角度测试建议按顺序输入：
+
+```text
+ping
+enable
+state
+mode posvel
+posvel 3 0.3
+state
+posvel 0 0.3
+disable
+q
+```
+
+相比达妙控制台新增的交互命令：
+
+| 命令 | 说明 |
+|---|---|
+| `ping` | ping 选中电机（type-0 GET_DEVICE_ID） |
+| `clear_error` | 清除电机故障状态 |
+| `csp <pos_deg> [vlim]` | 灵足原生 CSP 位置模式（run_mode=5），只驱动选中关节 |
+| `report <on\|off>` | 开/关主动状态上报 |
+| `read_param <id> [type]` | 读取 0x7000 参数表，例如 `read_param 0x7019` |
+| `write_param <id> <value> [type]` | 写入参数，例如 `write_param 0x701E 13.0` |
+| `save_params` | 保存参数（断电保持，type-22） |
+
+POS_VEL 模式下，YAML 中的环路增益会在切换 `run_mode` 前写入灵足参数表
+（`0x7017 limit_spd`、`0x701F spd_kp`、`0x7020 spd_ki`、`0x701E loc_kp`）；
+灵足没有独立的位置环 Ki，`pos_ki` 字段被忽略。
+
 ### 2. 零点校准与状态监控
 
 `2_zero_and_read.py` 打印实时关节位置。若不加 `--skip-zero`，脚本会先要求确认，然后把当前姿态设为零点。
@@ -74,6 +124,9 @@ python example/python/1_damiao_text.py --port /dev/ttyACM0 --joint joint1
 ```bash
 python example/python/2_zero_and_read.py --port /dev/ttyACM0 --skip-zero
 python example/python/2_zero_and_read.py --port /dev/ttyACM0
+
+# 灵足 / RobStride
+python example/python/2_zero_and_read.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0 --skip-zero
 ```
 
 ### 3. 达妙 POS_VEL 参数寄存器读取
@@ -117,6 +170,9 @@ python example/python/0x02_read_damiao_pd.py --config python/rebotarm_control_rt
 
 ```bash
 python example/python/3_mit_control.py --port /dev/ttyACM0 --rate 150
+
+# 灵足 / RobStride
+python example/python/3_mit_control.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0 --rate 150
 ```
 
 输入格式：
@@ -133,9 +189,12 @@ q                             # 退出
 
 ```bash
 python example/python/4_pos_vel_control.py --port /dev/ttyACM0 --rate 150
+
+# 灵足 / RobStride
+python example/python/4_pos_vel_control.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0 --rate 150
 ```
 
-输入格式：
+输入格式：bnvb
 
 ```text
 q1 q2 q3 q4 q5 q6 [vlim]      # 关节角度单位为度，vlim 单位为 rad/s
@@ -151,6 +210,9 @@ q                             # 退出
 
 ```bash
 python example/python/5_fk_test.py
+
+# 灵足 URDF / gripper_end 末端 frame
+python example/python/5_fk_test.py --config python/rebotarm_control_rt/config/arm_rs.yaml
 ```
 
 示例输入：
@@ -172,6 +234,9 @@ python example/python/5_fk_test.py
 
 ```bash
 python example/python/6_ik_test.py
+
+# 灵足 URDF / gripper_end 末端 frame
+python example/python/6_ik_test.py --config python/rebotarm_control_rt/config/arm_rs.yaml
 ```
 
 输入格式：
@@ -196,6 +261,9 @@ x y z roll pitch yaw          # 米 + 度
 
 ```bash
 python example/python/7_arm_ik_control.py --port /dev/ttyACM0
+
+# 灵足 / RobStride
+python example/python/7_arm_ik_control.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0
 ```
 
 示例输入：
@@ -220,6 +288,9 @@ python example/python/7_arm_ik_control.py --port /dev/ttyACM0
 
 ```bash
 python example/python/8_arm_traj_control.py --port /dev/ttyACM0
+
+# 灵足 / RobStride
+python example/python/8_arm_traj_control.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0
 ```
 
 输入格式：
@@ -244,6 +315,13 @@ x y z [roll pitch yaw] [duration]
 
 ```bash
 python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200
+
+# 灵足 / RobStride
+python example/python/9_gravity_compensation.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --rate 200 \
+  --use_gripper=false
 ```
 
 控制律：
@@ -258,6 +336,13 @@ pos = 当前关节位置
 
 ```bash
 python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200 --use_gripper=false
+
+# 灵足 / RobStride 机械臂本体模型
+python example/python/9_gravity_compensation.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --rate 200 \
+  --use_gripper=false
 ```
 
 按 `Ctrl+C` 停止并断开。
@@ -268,6 +353,13 @@ python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200 -
 
 ```bash
 python example/python/10_gravity_compensation_lock.py --port /dev/ttyACM0 --rate 200
+
+# 灵足 / RobStride
+python example/python/10_gravity_compensation_lock.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --rate 200 \
+  --use_gripper=false
 ```
 
 常用参数：
@@ -286,6 +378,9 @@ python example/python/10_gravity_compensation_lock.py --port /dev/ttyACM0 --rate
 
 ```bash
 python example/python/gripper_test.py --port /dev/ttyACM0
+
+# 灵足 / RobStride 夹爪
+python example/python/gripper_test.py --config python/rebotarm_control_rt/config/gripper_rs.yaml --port can0
 ```
 
 交互命令：
@@ -307,6 +402,15 @@ python example/python/gripper_test.py --port /dev/ttyACM0
 ```bash
 python example/python/tool_calibration.py \
   --port /dev/ttyACM0 \
+  --samples 4 \
+  --kd 0.5 \
+  --gravity-scale 1.0
+
+# 灵足 / RobStride，默认会更新固定关节 j_gripper_end
+python example/python/tool_calibration.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --frame link6 \
   --samples 4 \
   --kd 0.5 \
   --gravity-scale 1.0
@@ -369,12 +473,27 @@ time,q1,q2,q3,q4,q5,q6,dq1,...,dq6,ddq1,...,ddq6,tau1,...,tau6
 
 这个方案用于尽量把机械臂本体和新夹爪分开。第一阶段拆掉夹爪或确保末端不带额外负载；第二阶段装上新夹爪，只辨识 `end_link` 负载。这个方案最适合调重力补偿手感。
 
+灵足 / RobStride 使用时，在录制和回放命令里加 `--config python/rebotarm_control_rt/config/arm_rs.yaml --port can0`。
+灵足 URDF 使用 `gripper_end` / `j_gripper_end`，不是 B601 的 `end_link` 负载约定；
+建议先做机械臂本体辨识。只有当你已经给灵足 URDF 添加了工具负载 inertial 时，再显式选择对应 payload link。
+
 #### A1. 录制机械臂本体轨迹
 
 ```bash
 python example/python/11_record_gravity_trajectory.py \
   --output calibration/arm_only_trajectory.csv \
   --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0 \
+  --use_gripper=false
+
+# 灵足 / RobStride
+python example/python/11_record_gravity_trajectory.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --output calibration/lingzu_arm_only_trajectory.csv \
+  --port can0 \
   --rate 200 \
   --sample-rate 100 \
   --kd 1.0 \
@@ -389,6 +508,13 @@ python example/python/12_collect_identification_data.py \
   --trajectory calibration/arm_only_trajectory.csv \
   --output calibration/id_data_arm_only.csv \
   --port /dev/ttyACM0
+
+# 灵足 / RobStride 预览
+python example/python/12_collect_identification_data.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --trajectory calibration/lingzu_arm_only_trajectory.csv \
+  --output calibration/id_data_lingzu_arm_only.csv \
+  --port can0
 ```
 
 #### A3. 回放并采集机械臂本体数据
@@ -398,6 +524,14 @@ python example/python/12_collect_identification_data.py \
   --trajectory calibration/arm_only_trajectory.csv \
   --output calibration/id_data_arm_only.csv \
   --port /dev/ttyACM0 \
+  --execute
+
+# 灵足 / RobStride 回放
+python example/python/12_collect_identification_data.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --trajectory calibration/lingzu_arm_only_trajectory.csv \
+  --output calibration/id_data_lingzu_arm_only.csv \
+  --port can0 \
   --execute
 ```
 
@@ -410,6 +544,14 @@ python example/python/13_identify_dynamics.py \
   --ignore-payload-link end_link \
   --output calibration/identified_arm.yaml \
   --urdf-output calibration/identified_arm.urdf
+
+# 灵足 / RobStride 机械臂本体
+python example/python/13_identify_dynamics.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --data calibration/id_data_lingzu_arm_only.csv \
+  --mode full \
+  --output calibration/identified_lingzu_arm.yaml \
+  --urdf-output calibration/identified_lingzu_arm.urdf
 ```
 
 `--ignore-payload-link end_link` 会在辨识时临时移除 `end_link` 的 inertial，避免旧夹爪参数污染机械臂本体结果。
@@ -470,6 +612,14 @@ python example/python/9_gravity_compensation.py \
   --rate 200 \
   --kd 1.0 \
   --urdf calibration/identified_arm_with_gripper.urdf
+
+# 灵足 / RobStride 辨识后的机械臂模型
+python example/python/9_gravity_compensation.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_lingzu_arm.urdf
 ```
 
 ### 方案 B：机械臂加夹爪一起辨识
@@ -566,4 +716,9 @@ conda install -c conda-forge "pinocchio>=3.2,<4"
 env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/fk_sim.py
 env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/ik_sim.py
 env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/traj_sim.py
+
+# 灵足 URDF
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/fk_sim.py --config python/rebotarm_control_rt/config/arm_rs.yaml
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/ik_sim.py --config python/rebotarm_control_rt/config/arm_rs.yaml
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/traj_sim.py --config python/rebotarm_control_rt/config/arm_rs.yaml
 ```
