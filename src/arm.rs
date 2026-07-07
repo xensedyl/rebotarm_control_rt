@@ -146,6 +146,7 @@ struct Inner {
     ctrl_rate: Mutex<f64>,
     send_overruns: AtomicU64, // 控制发送线程错过截止的次数
     read_overruns: AtomicU64, // 反馈读取线程错过截止的次数
+    send_errors: AtomicU64, // 控制发送接口返回错误的次数
 }
 
 impl Inner {
@@ -404,6 +405,26 @@ impl Inner {
             eprintln!("[disable] 未确认失能的电机: {failed:?}");
         }
     }
+
+    fn disable_motors_best_effort(&self, py: Python<'_>, delay_per_motor: f64) {
+        if self.loop_active() {
+            self.stop_loop(py);
+        }
+        let motors = self.motors.lock().unwrap();
+        let ordered = self
+            .order
+            .iter()
+            .filter_map(|name| motors.get(name).cloned().map(|m| (name.clone(), m)))
+            .collect::<Vec<_>>();
+        drop(motors);
+
+        for (name, motor) in ordered {
+            if let Err(e) = motor.disable() {
+                eprintln!("[disconnect/disable/{name}] {e}");
+            }
+            sleep_s(delay_per_motor);
+        }
+    }
 }
 
 /// 机械臂控制句柄。
@@ -448,6 +469,7 @@ impl RobotArm {
             ctrl_rate: Mutex::new(cfg.rate),
             send_overruns: AtomicU64::new(0),
             read_overruns: AtomicU64::new(0),
+            send_errors: AtomicU64::new(0),
         });
         inner.build()?;
         Ok(RobotArm {
@@ -510,15 +532,19 @@ impl RobotArm {
     fn disconnect(&self, py: Python<'_>, disable: bool) {
         self.inner.stop_loop(py);
         if disable {
-            self.inner.disable(py, None, 0.05, 0, 0.1);
+            self.inner.disable_motors_best_effort(py, 0.05);
             sleep_s(0.5);
         }
         let ctrls: Vec<Arc<UniController>> =
             self.inner.ctrls.lock().unwrap().values().cloned().collect();
         for c in &ctrls {
-            let _ = c.shutdown();
+            if let Err(e) = c.shutdown() {
+                eprintln!("[disconnect/shutdown] {e}");
+            }
             sleep_s(0.1);
-            let _ = c.close_bus();
+            if let Err(e) = c.close_bus() {
+                eprintln!("[disconnect/close_bus] {e}");
+            }
         }
         self.inner.ctrls.lock().unwrap().clear();
         self.inner.motors.lock().unwrap().clear();
@@ -1220,6 +1246,7 @@ impl RobotArm {
         *inner.ctrl_rate.lock().unwrap() = rate_val;
         inner.send_overruns.store(0, Ordering::Release);
         inner.read_overruns.store(0, Ordering::Release);
+        inner.send_errors.store(0, Ordering::Release);
         inner.running.store(true, Ordering::Release);
 
         // 启动前捕获电机/控制器句柄（避免循环中加锁）。
@@ -1240,18 +1267,34 @@ impl RobotArm {
                 for (i, m) in control_motors.iter().enumerate() {
                     match t.mode {
                         2 => {
-                            if t.force_pos.get(i).copied().unwrap_or(false) {
+                            let result = if t.force_pos.get(i).copied().unwrap_or(false) {
                                 let ratio = t.force_pos_torque_ratio.get(i).copied().unwrap_or(0.0);
-                                let _ = m.send_force_pos(t.pos[i], t.vlim[i], ratio);
+                                m.send_force_pos(t.pos[i], t.vlim[i], ratio)
                             } else {
-                                let _ = m.send_pos_vel(t.pos[i], t.vlim[i]);
+                                m.send_pos_vel(t.pos[i], t.vlim[i])
+                            };
+                            if let Err(e) = result {
+                                let count = run_inner.send_errors.fetch_add(1, Ordering::Relaxed);
+                                if count < 5 {
+                                    eprintln!("[rt/send_pos_vel/{i}] {e}");
+                                }
                             }
                         }
                         3 => {
-                            let _ = m.send_vel(t.vel[i]);
+                            if let Err(e) = m.send_vel(t.vel[i]) {
+                                let count = run_inner.send_errors.fetch_add(1, Ordering::Relaxed);
+                                if count < 5 {
+                                    eprintln!("[rt/send_vel/{i}] {e}");
+                                }
+                            }
                         }
                         _ => {
-                            let _ = m.send_mit(t.pos[i], t.vel[i], t.kp[i], t.kd[i], t.tau[i]);
+                            if let Err(e) = m.send_mit(t.pos[i], t.vel[i], t.kp[i], t.kd[i], t.tau[i]) {
+                                let count = run_inner.send_errors.fetch_add(1, Ordering::Relaxed);
+                                if count < 5 {
+                                    eprintln!("[rt/send_mit/{i}] {e}");
+                                }
+                            }
                         }
                     }
                     if !command_gap.is_zero() && i + 1 < control_motors.len() {
@@ -1311,6 +1354,12 @@ impl RobotArm {
     #[getter]
     fn rt_read_overruns(&self) -> u64 {
         self.inner.read_overruns.load(Ordering::Relaxed)
+    }
+
+    /// 最近一次 RT 循环运行期间控制发送接口返回错误的次数。
+    #[getter]
+    fn rt_send_errors(&self) -> u64 {
+        self.inner.send_errors.load(Ordering::Relaxed)
     }
 
     /// 兼容旧接口：等价于 rt_send_overruns。

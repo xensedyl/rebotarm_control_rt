@@ -16,7 +16,8 @@ use motor_vendor_damiao::{ControlMode as DamiaoMode, DamiaoController, DamiaoMot
 use motor_vendor_hightorque::{HightorqueController, HightorqueMotor};
 use motor_vendor_myactuator::{MyActuatorController, MyActuatorMotor};
 use motor_vendor_robstride::{
-    ControlMode as RsMode, ParameterValue, RobstrideController, RobstrideMotor,
+    ControlMode as RsMode, ParameterId as RsParameterId, ParameterValue, RobstrideController,
+    RobstrideMotor,
 };
 
 /// 归一化后的电机状态（位置/速度单位为 rad、rad/s；力矩 N·m）。
@@ -269,14 +270,16 @@ impl UniMotor {
                 .send_position_absolute_setpoint(pos * (180.0 / PI), vlim * (180.0 / PI))
                 .map_err(|e| e.to_string()),
             UniMotor::Robstride(m) => {
-                // 统一 POS_VEL → RobStride 原生 Position 模式
-                m.set_mode(RsMode::Position).map_err(|e| e.to_string())?;
+                // mode_pos_vel()/ensure_mode_for_control() owns run_mode switching
+                // and enable sequencing. The RT loop must only refresh runtime
+                // targets; repeatedly writing run_mode inside the loop can reset
+                // RobStride's position controller and make loc_ref look ignored.
                 let v = vlim.abs();
                 if v.is_finite() && v > 0.0 {
-                    m.write_parameter(0x7017, ParameterValue::F32(v))
+                    m.write_parameter(RsParameterId::VelocityLimit as u16, ParameterValue::F32(v))
                         .map_err(|e| e.to_string())?;
                 }
-                m.write_parameter(0x7016, ParameterValue::F32(pos))
+                m.write_parameter(RsParameterId::PositionTarget as u16, ParameterValue::F32(pos))
                     .map_err(|e| e.to_string())
             }
             UniMotor::Hightorque(m) => m.send_cmd_pos_vel(pos, vlim).map_err(|e| e.to_string()),
@@ -681,6 +684,25 @@ mod tests {
             .write_pos_vel_gains(0.0, 0.0, 0.0, 0.0, 0.0)
             .expect("no-op gains");
         assert!(bus.sent.lock().expect("sent frames").is_empty());
+    }
+
+    #[test]
+    fn robstride_send_pos_vel_updates_runtime_targets_without_rewriting_mode() {
+        let (bus, motor) = mock_robstride();
+        motor
+            .send_pos_vel(1.25, 2.5)
+            .expect("send robstride pos vel target");
+        let sent = bus.sent.lock().expect("sent frames");
+        let ids: Vec<u16> = sent
+            .iter()
+            .map(|f| u16::from_le_bytes([f.data[0], f.data[1]]))
+            .collect();
+        assert_eq!(ids, vec![0x7017, 0x7016]);
+        assert!(!ids.contains(&(RsParameterId::Mode as u16)));
+        assert_eq!(
+            f32::from_le_bytes([sent[1].data[4], sent[1].data[5], sent[1].data[6], sent[1].data[7]]),
+            1.25
+        );
     }
 
     #[test]
