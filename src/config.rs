@@ -69,6 +69,8 @@ pub struct ArmConfig {
     pub name: String,
     pub channel: String,
     pub rate: f64,
+    pub urdf_path: Option<String>,
+    pub end_effector_frame: Option<String>,
     pub joints: Vec<JointCfg>,
 }
 
@@ -134,6 +136,8 @@ pub fn parse_arm_config(path: &str) -> PyResult<ArmConfig> {
     let name = as_str(get(&data, "name")).unwrap_or_else(|| "reBotArm".to_string());
     let channel = as_str(get(&data, "channel")).unwrap_or_else(|| "/dev/ttyACM0".to_string());
     let rate = as_float(get(&data, "rate")).unwrap_or(500.0);
+    let urdf_path = as_str(get(&data, "urdf_path"));
+    let end_effector_frame = as_str(get(&data, "end_effector_frame"));
 
     let mut joints = Vec::new();
     if let Some(Value::Sequence(seq)) = data.get("joints") {
@@ -171,6 +175,8 @@ pub fn parse_arm_config(path: &str) -> PyResult<ArmConfig> {
         name,
         channel,
         rate,
+        urdf_path,
+        end_effector_frame,
         joints,
     })
 }

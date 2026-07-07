@@ -1,0 +1,19 @@
+# reBotArm RS 夹爪配置文件 —— 灵足（RobStride）电机 + CAN 总线
+# 参数参考 reBotArm_control_py 的 config/rebotarm_rs.yaml 的 gripper 关节。
+
+channel: can0
+
+gripper:
+  - name: gripper
+    motor_id: 0x07
+    feedback_id: 0xFD
+    model: "rs-00"
+    vendor: "robstride"
+    MIT:
+      kp: 50.0
+      kd: 4.0
+    POS_VEL:
+      vel_kp: 4.0
+      vel_ki: 0.1
+      pos_kp: 10.0
+      vlim: 5.0

@@ -23,6 +23,8 @@ fn load_cfg<'py>(py: Python<'py>, path: String) -> PyResult<Bound<'py, PyDict>> 
     d.set_item("name", cfg.name)?;
     d.set_item("channel", cfg.channel)?;
     d.set_item("rate", cfg.rate)?;
+    d.set_item("urdf_path", cfg.urdf_path)?;
+    d.set_item("end_effector_frame", cfg.end_effector_frame)?;
     let joints = PyList::new(py, cfg.joints.into_iter().map(|j| Py::new(py, j).unwrap()))?;
     d.set_item("joints", joints)?;
     Ok(d)

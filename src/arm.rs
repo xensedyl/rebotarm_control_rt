@@ -125,6 +125,8 @@ impl Targets {
 struct Inner {
     channel: String,
     rate: f64,
+    urdf_path: Option<String>,
+    end_effector_frame: Option<String>,
     order: Vec<String>,
     joints: Vec<JointCfg>,
 
@@ -248,7 +250,7 @@ impl Inner {
 
     fn ensure_mode_one(&self, name: &str, mode: u32) -> bool {
         match self.motor(name) {
-            Some(m) => match m.ensure_mode(mode, 1000) {
+            Some(m) => match m.ensure_mode_for_control(mode, 1000) {
                 Ok(()) => true,
                 Err(e) => {
                     eprintln!("[ensure_mode/{name}] 跳过: {e}");
@@ -261,7 +263,7 @@ impl Inner {
 
     fn ensure_mode_one_timeout(&self, name: &str, mode: u32, timeout_ms: u32) -> Result<(), String> {
         match self.motor(name) {
-            Some(m) => m.ensure_mode(mode, timeout_ms),
+            Some(m) => m.ensure_mode_for_control(mode, timeout_ms),
             None => Err(format!("Unknown joint: {name}")),
         }
     }
@@ -428,6 +430,8 @@ impl RobotArm {
         let inner = Arc::new(Inner {
             channel: cfg.channel,
             rate: cfg.rate,
+            urdf_path: cfg.urdf_path,
+            end_effector_frame: cfg.end_effector_frame,
             order,
             joints: cfg.joints,
             ctrls: Mutex::new(HashMap::new()),
@@ -467,6 +471,16 @@ impl RobotArm {
     #[getter]
     fn mode(&self) -> String {
         self.inner.mode.lock().unwrap().clone()
+    }
+
+    #[getter]
+    fn urdf_path(&self) -> Option<String> {
+        self.inner.urdf_path.clone()
+    }
+
+    #[getter]
+    fn end_effector_frame(&self) -> Option<String> {
+        self.inner.end_effector_frame.clone()
     }
 
     #[getter]
@@ -708,21 +722,20 @@ impl RobotArm {
         check_len("vlim", &vlim, self.inner.num_joints())?;
         *self.inner.mode.lock().unwrap() = "pos_vel".to_string();
         let vlim = vlim.unwrap_or_else(|| self.inner.joints.iter().map(|j| j.vlim).collect());
-        *self.inner.pv_vlim.lock().unwrap() = vlim;
+        *self.inner.pv_vlim.lock().unwrap() = vlim.clone();
         let mut ok = true;
-        for jc in &self.inner.joints {
+        for (i, jc) in self.inner.joints.iter().enumerate() {
             if let Some(m) = self.inner.motor(&jc.name) {
-                if jc.vel_kp > 0.0 {
-                    let _ = m.write_register_f32(25, jc.vel_kp as f32); // KP_ASR
-                }
-                if jc.vel_ki > 0.0 {
-                    let _ = m.write_register_f32(26, jc.vel_ki as f32); // KI_ASR
-                }
-                if jc.pos_kp > 0.0 {
-                    let _ = m.write_register_f32(27, jc.pos_kp as f32); // KP_APR
-                }
-                if jc.pos_ki > 0.0 {
-                    let _ = m.write_register_f32(28, jc.pos_ki as f32); // KI_APR
+                // 按厂商写入环路增益：Damiao 走寄存器 25~28，灵足 RobStride 走参数表
+                // 0x7017/0x701F/0x7020/0x701E（对齐 reBotArm_control_py 的 _write_pv_params）。
+                if let Err(e) = m.write_pos_vel_gains(
+                    jc.vel_kp as f32,
+                    jc.vel_ki as f32,
+                    jc.pos_kp as f32,
+                    jc.pos_ki as f32,
+                    vlim[i] as f32,
+                ) {
+                    eprintln!("[mode_pos_vel/{}] 写入增益失败: {e}", jc.name);
                 }
                 if jc.vel_kp > 0.0 || jc.vel_ki > 0.0 || jc.pos_kp > 0.0 || jc.pos_ki > 0.0 {
                     sleep_s(0.02);
@@ -787,21 +800,133 @@ impl RobotArm {
                 .inner
                 .motor(name)
                 .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?;
-            let vel_kp = motor.get_register_f32(25, timeout_ms).map_err(|e| {
-                PyRuntimeError::new_err(format!("read {name}.vel_kp register 25 failed: {e}"))
+            let g = motor.read_pos_vel_gains(timeout_ms).map_err(|e| {
+                PyRuntimeError::new_err(format!("read {name} pos_vel gains failed: {e}"))
             })?;
-            let vel_ki = motor.get_register_f32(26, timeout_ms).map_err(|e| {
-                PyRuntimeError::new_err(format!("read {name}.vel_ki register 26 failed: {e}"))
-            })?;
-            let pos_kp = motor.get_register_f32(27, timeout_ms).map_err(|e| {
-                PyRuntimeError::new_err(format!("read {name}.pos_kp register 27 failed: {e}"))
-            })?;
-            let pos_ki = motor.get_register_f32(28, timeout_ms).map_err(|e| {
-                PyRuntimeError::new_err(format!("read {name}.pos_ki register 28 failed: {e}"))
-            })?;
-            gains.insert(name.clone(), (vel_kp, vel_ki, pos_kp, pos_ki));
+            gains.insert(name.clone(), g);
         }
         Ok(gains)
+    }
+
+    // ---------------- 灵足（RobStride）底层接口 ----------------
+    // 与 motorbridge Python binding 的 robstride_* 方法一一对应
+    //（参见 reBotArm_control_py/example/0x01rs06_test.py 的用法）。
+
+    /// 清除指定关节电机的错误状态（Damiao / 灵足 RobStride / HighTorque）。
+    fn clear_error(&self, name: String) -> PyResult<()> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .clear_error()
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    /// Ping 灵足电机，返回 (device_id, responder_id)。用于连通性检查。
+    #[pyo3(signature = (name, timeout_ms=500))]
+    fn robstride_ping(&self, name: String, timeout_ms: u64) -> PyResult<(u8, u8)> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_ping(timeout_ms)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    /// 开/关灵足电机主动状态上报。灵足无单帧状态查询命令，
+    /// 建议 enable 后对每个灵足关节开启主动上报以获得持续反馈。
+    fn robstride_set_active_report(&self, name: String, enabled: bool) -> PyResult<()> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_set_active_report(enabled)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    /// 保存灵足电机参数（断电保持）。
+    fn robstride_save_parameters(&self, name: String) -> PyResult<()> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_save_parameters()
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    fn robstride_write_param_f32(&self, name: String, param_id: u16, value: f32) -> PyResult<()> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_write_param_f32(param_id, value)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    fn robstride_write_param_u8(&self, name: String, param_id: u16, value: u8) -> PyResult<()> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_write_param_u8(param_id, value)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    fn robstride_write_param_u16(&self, name: String, param_id: u16, value: u16) -> PyResult<()> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_write_param_u16(param_id, value)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    fn robstride_write_param_u32(&self, name: String, param_id: u16, value: u32) -> PyResult<()> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_write_param_u32(param_id, value)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    #[pyo3(signature = (name, param_id, timeout_ms=1000))]
+    fn robstride_get_param_f32(&self, name: String, param_id: u16, timeout_ms: u64) -> PyResult<f32> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_get_param_f32(param_id, timeout_ms)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    #[pyo3(signature = (name, param_id, timeout_ms=1000))]
+    fn robstride_get_param_u8(&self, name: String, param_id: u16, timeout_ms: u64) -> PyResult<u8> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_get_param_u8(param_id, timeout_ms)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    #[pyo3(signature = (name, param_id, timeout_ms=1000))]
+    fn robstride_get_param_u16(&self, name: String, param_id: u16, timeout_ms: u64) -> PyResult<u16> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_get_param_u16(param_id, timeout_ms)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    #[pyo3(signature = (name, param_id, timeout_ms=1000))]
+    fn robstride_get_param_u32(&self, name: String, param_id: u16, timeout_ms: u64) -> PyResult<u32> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_get_param_u32(param_id, timeout_ms)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    /// 灵足原生 CSP 位置模式单关节控制（run_mode=5）：
+    /// 依次 set_mode(CSP)、enable、写 limit_spd(0x7017) 与 loc_ref(0x7016)。
+    /// 用于不切换全臂模式的场景下单独驱动某个灵足关节。
+    fn robstride_pos_vel_csp(&self, name: String, pos: f64, vlim: f64) -> PyResult<()> {
+        self.inner
+            .motor(&name)
+            .ok_or_else(|| PyValueError::new_err(format!("Unknown joint: {name}")))?
+            .robstride_send_pos_vel_csp(pos as f32, vlim as f32)
+            .map_err(PyRuntimeError::new_err)
     }
 
     // ---------------- 控制命令 ----------------
