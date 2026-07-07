@@ -1,6 +1,5 @@
-use motor_vendor_damiao::ControlMode;
 use rebotarm_control_rt_rust_examples::common::{
-    deg_to_rad_f32, has_flag, parse_port, prompt, B601Arm,
+    deg_to_rad_f32, has_flag, parse_port, prompt, B601Arm, ControlMode,
 };
 use std::env;
 use std::error::Error;
@@ -14,9 +13,14 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     let arm = B601Arm::open(&parse_port(&args))?;
-    let gripper = &arm.motors[6];
+    let gripper_index = if arm.motors.len() > 6 { 6 } else { 0 };
+    let gripper = &arm.motors[gripper_index];
     arm.enable()?;
-    gripper.ensure_control_mode(ControlMode::ForcePos, Duration::from_millis(300))?;
+    if gripper.vendor() == "robstride" {
+        gripper.ensure_control_mode(ControlMode::PosVel, Duration::from_millis(300))?;
+    } else {
+        gripper.ensure_control_mode(ControlMode::ForcePos, Duration::from_millis(300))?;
+    }
 
     println!("Gripper commands: open / close / pos <deg> / forcepos <deg> [vlim] [ratio] / posvel <deg> [vlim] / state / q");
     loop {
@@ -32,9 +36,16 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
         let parts: Vec<&str> = line.split_whitespace().collect();
         match parts.first().copied() {
+            Some("open") if gripper.vendor() == "robstride" => gripper.send_cmd_pos_vel(0.0, 5.235_987_7)?,
             Some("open") => gripper.send_cmd_force_pos(0.0, 5.235_987_7, 0.05)?,
+            Some("close") if gripper.vendor() == "robstride" => {
+                gripper.send_cmd_pos_vel(deg_to_rad_f32(-270.0), 5.235_987_7)?
+            }
             Some("close") => {
                 gripper.send_cmd_force_pos(deg_to_rad_f32(-270.0), 5.235_987_7, 0.05)?
+            }
+            Some("pos") if parts.len() >= 2 && gripper.vendor() == "robstride" => {
+                gripper.send_cmd_pos_vel(deg_to_rad_f32(parts[1].parse()?), 5.235_987_7)?
             }
             Some("pos") if parts.len() >= 2 => {
                 gripper.send_cmd_force_pos(deg_to_rad_f32(parts[1].parse()?), 5.235_987_7, 0.05)?

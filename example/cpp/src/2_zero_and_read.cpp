@@ -20,7 +20,7 @@ int main(int argc, char** argv) {
         arm.disable();
         for (int i = 0; i < static_cast<int>(arm.motors.size()); ++i) {
           arm.motors[i].set_zero_position();
-          std::cout << "zero set: " << example::b601_joints()[i].name << "\n";
+          std::cout << "zero set: " << arm.joints[i].name << "\n";
         }
       } else {
         std::cout << "zero skipped\n";

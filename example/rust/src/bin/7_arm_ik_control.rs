@@ -1,7 +1,6 @@
-use motor_vendor_damiao::ControlMode;
 use rebotarm_control_rt_rust_examples::common::{
     has_flag, move_pos_vel_path, parse_float_arg, parse_floats, parse_port, parse_rate, prompt,
-    q_deg, B601Arm, MathModel, DEFAULT_RATE_HZ,
+    q_deg, B601Arm, ControlMode, MathModel, DEFAULT_RATE_HZ,
 };
 use std::env;
 use std::error::Error;
