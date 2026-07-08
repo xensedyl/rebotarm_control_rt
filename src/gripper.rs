@@ -35,6 +35,10 @@ impl Inner {
     fn motor(&self) -> Option<Arc<UniMotor>> {
         self.motor.lock().unwrap().clone()
     }
+    fn require_motor(&self) -> PyResult<Arc<UniMotor>> {
+        self.motor()
+            .ok_or_else(|| PyRuntimeError::new_err("电机未初始化（已 disconnect？）"))
+    }
     fn ctrl(&self) -> Option<Arc<UniController>> {
         self.ctrl.lock().unwrap().clone()
     }
@@ -257,10 +261,16 @@ impl Gripper {
     fn mode_pos_vel(&self, stabilize_delay: f64) -> bool {
         *self.inner.mode.lock().unwrap() = "pos_vel".to_string();
         if let Some(m) = self.inner.motor() {
-            let _ = m.write_register_f32(25, self.inner.cfg.vel_kp as f32);
-            let _ = m.write_register_f32(26, self.inner.cfg.vel_ki as f32);
-            let _ = m.write_register_f32(27, self.inner.cfg.pos_kp as f32);
-            let _ = m.write_register_f32(28, self.inner.cfg.pos_ki as f32);
+            // 按厂商写入环路增益：Damiao 走寄存器 25~28，灵足 RobStride 走参数表。
+            if let Err(e) = m.write_pos_vel_gains(
+                self.inner.cfg.vel_kp as f32,
+                self.inner.cfg.vel_ki as f32,
+                self.inner.cfg.pos_kp as f32,
+                self.inner.cfg.pos_ki as f32,
+                self.inner.cfg.vlim as f32,
+            ) {
+                eprintln!("[mode_pos_vel] 写入增益失败: {e}");
+            }
             sleep_s(0.02);
         }
         let ok = self
@@ -313,6 +323,50 @@ impl Gripper {
         }
         self.inner.request();
         self.inner.poll();
+    }
+
+    // ---------------- 灵足（RobStride）底层接口 ----------------
+
+    /// 清除电机错误状态（Damiao / 灵足 RobStride / HighTorque）。
+    fn clear_error(&self) -> PyResult<()> {
+        self.inner.require_motor()?
+            .clear_error()
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    /// Ping 灵足电机，返回 (device_id, responder_id)。
+    #[pyo3(signature = (timeout_ms=500))]
+    fn robstride_ping(&self, timeout_ms: u64) -> PyResult<(u8, u8)> {
+        self.inner.require_motor()?
+            .robstride_ping(timeout_ms)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    /// 开/关灵足电机主动状态上报。
+    fn robstride_set_active_report(&self, enabled: bool) -> PyResult<()> {
+        self.inner.require_motor()?
+            .robstride_set_active_report(enabled)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    /// 保存灵足电机参数（断电保持）。
+    fn robstride_save_parameters(&self) -> PyResult<()> {
+        self.inner.require_motor()?
+            .robstride_save_parameters()
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    fn robstride_write_param_f32(&self, param_id: u16, value: f32) -> PyResult<()> {
+        self.inner.require_motor()?
+            .robstride_write_param_f32(param_id, value)
+            .map_err(PyRuntimeError::new_err)
+    }
+
+    #[pyo3(signature = (param_id, timeout_ms=1000))]
+    fn robstride_get_param_f32(&self, param_id: u16, timeout_ms: u64) -> PyResult<f32> {
+        self.inner.require_motor()?
+            .robstride_get_param_f32(param_id, timeout_ms)
+            .map_err(PyRuntimeError::new_err)
     }
 
     // ---------------- 控制循环 ----------------

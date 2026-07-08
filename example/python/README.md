@@ -68,6 +68,36 @@ Interactive commands:
 | `state` | Print selected joint position, velocity, and torque |
 | `q` | Stop and disconnect |
 
+### 1b. LingZu (RobStride) Single Motor Console
+
+`0x03robstride_test.py` is the LingZu (RobStride) counterpart of the single-joint terminal. It
+loads the packaged `arm_rs.yaml` (LingZu motors over CAN) by default, enables active status
+reporting for continuous feedback, and adds RobStride low-level commands on top of the usual
+MIT / POS_VEL / VEL control.
+
+```bash
+# Bring up the CAN interface first
+sudo ip link set can0 up type can bitrate 1000000
+
+python example/python/0x03robstride_test.py --port can0 --joint 0
+```
+
+Additional interactive commands compared to the Damiao console:
+
+| Command | Description |
+|---|---|
+| `ping` | Ping the selected motor (type-0 GET_DEVICE_ID) |
+| `clear_error` | Clear the motor fault state |
+| `csp <pos_deg> [vlim]` | Native RobStride CSP position mode (run_mode=5) for the selected joint |
+| `report <on\|off>` | Toggle active status reporting |
+| `read_param <id> [type]` | Read a parameter from the 0x7000 table, e.g. `read_param 0x7019` |
+| `write_param <id> <value> [type]` | Write a parameter, e.g. `write_param 0x701E 13.0` |
+| `save_params` | Persist parameters across power cycles (type-22) |
+
+In POS_VEL mode the loop gains from the YAML are written to the RobStride parameter table
+(`0x7017 limit_spd`, `0x701F spd_kp`, `0x7020 spd_ki`, `0x701E loc_kp`) before switching
+`run_mode`; LingZu motors have no separate position-loop Ki, so `pos_ki` is ignored.
+
 ### 2. Zero Calibration and State Monitor
 
 `2_zero_and_read.py` prints live joint positions. If `--skip-zero` is omitted, it asks for

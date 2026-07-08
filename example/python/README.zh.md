@@ -67,6 +67,35 @@ python example/python/1_damiao_text.py --port /dev/ttyACM0 --joint joint1
 | `state` | 打印选中关节的位置、速度、力矩 |
 | `q` | 停止并断开 |
 
+### 1b. 灵足（RobStride）单电机控制台
+
+`0x03robstride_test.py` 是单关节终端的灵足（RobStride）版本。默认加载随包的
+`arm_rs.yaml`（灵足电机 + CAN 总线），启动时自动开启主动状态上报以获得持续反馈，
+并在常规 MIT / POS_VEL / VEL 控制之外提供灵足底层命令。
+
+```bash
+# 先启动 CAN 接口
+sudo ip link set can0 up type can bitrate 1000000
+
+python example/python/0x03robstride_test.py --port can0 --joint 0
+```
+
+相比达妙控制台新增的交互命令：
+
+| 命令 | 说明 |
+|---|---|
+| `ping` | ping 选中电机（type-0 GET_DEVICE_ID） |
+| `clear_error` | 清除电机故障状态 |
+| `csp <pos_deg> [vlim]` | 灵足原生 CSP 位置模式（run_mode=5），只驱动选中关节 |
+| `report <on\|off>` | 开/关主动状态上报 |
+| `read_param <id> [type]` | 读取 0x7000 参数表，例如 `read_param 0x7019` |
+| `write_param <id> <value> [type]` | 写入参数，例如 `write_param 0x701E 13.0` |
+| `save_params` | 保存参数（断电保持，type-22） |
+
+POS_VEL 模式下，YAML 中的环路增益会在切换 `run_mode` 前写入灵足参数表
+（`0x7017 limit_spd`、`0x701F spd_kp`、`0x7020 spd_ki`、`0x701E loc_kp`）；
+灵足没有独立的位置环 Ki，`pos_ki` 字段被忽略。
+
 ### 2. 零点校准与状态监控
 
 `2_zero_and_read.py` 打印实时关节位置。若不加 `--skip-zero`，脚本会先要求确认，然后把当前姿态设为零点。
