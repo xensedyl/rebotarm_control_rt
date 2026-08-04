@@ -34,8 +34,8 @@ rebotarm_control_rt/
 │   ├── dynamics/
 │   ├── trajectory/
 │   ├── controllers/
-│   └── config/                           #   installed with the package
-├── urdf/                                 # Project-level robot description assets
+│   ├── config/                           #   installed with the package
+│   └── urdf/                             #   packaged DevArm + RobStride assets
 ├── calibration/                          # Local generated calibration outputs
 ├── example/
 │   ├── python/                          # Python examples and MeshCat simulations
@@ -87,6 +87,10 @@ install and verify that both native modules can be imported:
 conda activate rebot
 python -c "import rebotarm_control_rt._math, rebotarm_control_rt._native; print('ok')"
 ```
+
+Both DevArm and RobStride URDF/mesh resources are installed inside the Python
+package. Use `default_urdf_path()` or `robstride_urdf_path()` from
+`rebotarm_control_rt.paths` instead of constructing repository-relative paths.
 
 ### Real-time note
 
@@ -169,10 +173,50 @@ Poses are unified at the Python boundary as **4×4 numpy homogeneous matrices**
 ## Vendor support (actuator)
 
 - **Damiao** — primary path, serial bridge over `/dev/tty*` at 921600.
-- **MyActuator / RobStride / HighTorque** — CAN.
+- **LingZu (RobStride)** — CAN, full low-level support (see below).
+- **MyActuator / HighTorque** — CAN.
 
 State normalization, mode mapping, and control-command dispatch all match the C-ABI
 implementation in `motor_abi`.
+
+### LingZu (RobStride) motors
+
+Packaged LingZu arm and gripper configs are provided as `config/arm_rs.yaml` and
+`config/gripper_rs.yaml` (parameters follow `rebotarm_rs.yaml` from `reBotArm_control_py`):
+
+```python
+from rebotarm_control_rt.actuator import RobotArm
+
+arm = RobotArm("python/rebotarm_control_rt/config/arm_rs.yaml")
+arm.connect(); arm.enable()
+
+# LingZu motors have no single-shot status query; enable active reporting so
+# get_state keeps receiving fresh feedback.
+for name in arm.joint_names:
+    arm.robstride_set_active_report(name, True)
+
+# MIT / POS_VEL / VEL share the same API as Damiao; mode_pos_vel writes the YAML
+# gains into the RobStride parameter table
+# (0x7017 limit_spd / 0x701F spd_kp / 0x7020 spd_ki / 0x701E loc_kp).
+arm.mode_pos_vel()
+arm.start_rt_loop(rate=150.0)
+```
+
+Low-level RobStride-specific methods (mirroring the `robstride_*` methods of the
+motorbridge Python binding):
+
+| Method | Description |
+|---|---|
+| `robstride_ping(name)` | Ping the motor, returns `(device_id, responder_id)` |
+| `clear_error(name)` | Clear the fault state (shared by Damiao / LingZu / HighTorque) |
+| `robstride_set_active_report(name, enabled)` | Toggle active status reporting (type-24) |
+| `robstride_write_param_{f32,u8,u16,u32}(name, id, value)` | Write the 0x7000 parameter table (type-18) |
+| `robstride_get_param_{f32,u8,u16,u32}(name, id)` | Read a parameter (type-17), e.g. `0x7019 mechPos` |
+| `robstride_save_parameters(name)` | Persist parameters across power cycles (type-22) |
+| `robstride_pos_vel_csp(name, pos, vlim)` | Native RobStride CSP position mode (run_mode=5) for one joint |
+
+Interactive debugging example: `example/python/0x03robstride_test.py` (see
+example/python/README.md for usage).
 
 ## Acknowledgments
 

@@ -1,5 +1,5 @@
 use rebotarm_control_rt_rust_examples::common::{
-    has_flag, parse_port, prompt, B601Arm, B601_JOINTS,
+    has_flag, parse_port, prompt, B601Arm,
 };
 use std::env;
 use std::error::Error;
@@ -19,7 +19,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         println!("Type YES to continue.");
         if prompt("confirm> ")?.as_deref() == Some("YES") {
             arm.disable()?;
-            for (joint, motor) in B601_JOINTS.iter().zip(&arm.motors) {
+            for (joint, motor) in arm.joints.iter().zip(&arm.motors) {
                 motor.set_zero_position()?;
                 println!("zero set: {}", joint.name);
             }

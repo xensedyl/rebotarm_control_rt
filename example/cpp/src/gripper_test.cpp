@@ -12,9 +12,15 @@ int main(int argc, char** argv) {
     }
 
     auto arm = example::B601Arm::open(example::parse_port(argc, argv));
-    auto& gripper = arm.motors[6];
+    const int gripper_index = arm.motors.size() > 6 ? 6 : 0;
+    auto& gripper = arm.motors[gripper_index];
+    const std::string vendor = arm.joints[gripper_index].vendor;
     arm.enable();
-    gripper.ensure_mode(motorbridge::Mode::FORCE_POS, 300);
+    if (vendor == "robstride") {
+      gripper.ensure_mode(motorbridge::Mode::POS_VEL, 300);
+    } else {
+      gripper.ensure_mode(motorbridge::Mode::FORCE_POS, 300);
+    }
 
     std::cout << "Gripper commands: open / close / pos <deg> / forcepos <deg> [vlim] [ratio] / posvel <deg> [vlim] / state / q\n";
     while (true) {
@@ -29,14 +35,22 @@ int main(int argc, char** argv) {
       std::istringstream in(line);
       std::string cmd;
       in >> cmd;
-      if (cmd == "open") {
+      if (cmd == "open" && vendor == "robstride") {
+        gripper.send_pos_vel(0.0f, 5.2359877f);
+      } else if (cmd == "open") {
         gripper.send_force_pos(0.0f, 5.2359877f, 0.05f);
+      } else if (cmd == "close" && vendor == "robstride") {
+        gripper.send_pos_vel(example::deg_to_rad_f32(-270.0), 5.2359877f);
       } else if (cmd == "close") {
         gripper.send_force_pos(example::deg_to_rad_f32(-270.0), 5.2359877f, 0.05f);
       } else if (cmd == "pos") {
         double pos = 0.0;
         in >> pos;
-        gripper.send_force_pos(example::deg_to_rad_f32(pos), 5.2359877f, 0.05f);
+        if (vendor == "robstride") {
+          gripper.send_pos_vel(example::deg_to_rad_f32(pos), 5.2359877f);
+        } else {
+          gripper.send_force_pos(example::deg_to_rad_f32(pos), 5.2359877f, 0.05f);
+        }
       } else if (cmd == "forcepos" || cmd == "force_pos") {
         double pos = 0.0;
         float vlim = 5.2359877f;

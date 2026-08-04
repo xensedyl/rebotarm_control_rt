@@ -1,5 +1,9 @@
 use libloading::Library;
-use motor_vendor_damiao::{ControlMode, DamiaoController, DamiaoMotor, MotorFeedbackState};
+use motor_vendor_damiao::{ControlMode as DamiaoMode, DamiaoController, DamiaoMotor};
+use motor_vendor_robstride::{
+    ControlMode as RobstrideMode, ParameterValue as RobstrideParameterValue, RobstrideController,
+    RobstrideMotor,
+};
 use std::env;
 use std::error::Error;
 use std::f64::consts::PI;
@@ -16,9 +20,10 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 pub const ARM_DOF: usize = 6;
 pub const ALL_DOF: usize = 7;
 pub const DEFAULT_PORT: &str = "/dev/ttyACM0";
+pub const DEFAULT_CONFIG_REL: &str = "python/rebotarm_control_rt/config/arm.yaml";
 pub const DEFAULT_RATE_HZ: f64 = 150.0;
 pub const DEFAULT_URDF_REL: &str =
-    "urdf/reBot-DevArm_fixend_description/urdf/reBot-DevArm_fixend.urdf";
+    "python/rebotarm_control_rt/urdf/reBot-DevArm_fixend_description/urdf/reBot-DevArm_fixend.urdf";
 pub const END_LINK_LOAD_SCALE_WITH_GRIPPER: f64 = 0.7;
 
 pub const ARM_LIMITS_RAD: [(f64, f64); ARM_DOF] = [
@@ -56,14 +61,19 @@ pub fn stop_requested() -> bool {
     STOP_REQUESTED.load(Ordering::SeqCst)
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct JointSpec {
     pub name: &'static str,
     pub motor_id: u16,
     pub feedback_id: u16,
     pub model: &'static str,
+    pub vendor: &'static str,
     pub mit_kp: f32,
     pub mit_kd: f32,
+    pub vel_kp: f32,
+    pub vel_ki: f32,
+    pub pos_kp: f32,
+    pub pos_ki: f32,
     pub vlim: f32,
 }
 
@@ -73,8 +83,13 @@ pub const B601_JOINTS: [JointSpec; ALL_DOF] = [
         motor_id: 0x01,
         feedback_id: 0x11,
         model: "4340P",
+        vendor: "damiao",
         mit_kp: 120.0,
         mit_kd: 8.0,
+        vel_kp: 0.0,
+        vel_ki: 0.0,
+        pos_kp: 0.0,
+        pos_ki: 0.0,
         vlim: 2.617_993_8,
     },
     JointSpec {
@@ -82,8 +97,13 @@ pub const B601_JOINTS: [JointSpec; ALL_DOF] = [
         motor_id: 0x02,
         feedback_id: 0x12,
         model: "4340P",
+        vendor: "damiao",
         mit_kp: 120.0,
         mit_kd: 8.0,
+        vel_kp: 0.0,
+        vel_ki: 0.0,
+        pos_kp: 0.0,
+        pos_ki: 0.0,
         vlim: 2.617_993_8,
     },
     JointSpec {
@@ -91,8 +111,13 @@ pub const B601_JOINTS: [JointSpec; ALL_DOF] = [
         motor_id: 0x03,
         feedback_id: 0x13,
         model: "4340P",
+        vendor: "damiao",
         mit_kp: 120.0,
         mit_kd: 8.0,
+        vel_kp: 0.0,
+        vel_ki: 0.0,
+        pos_kp: 0.0,
+        pos_ki: 0.0,
         vlim: 2.617_993_8,
     },
     JointSpec {
@@ -100,8 +125,13 @@ pub const B601_JOINTS: [JointSpec; ALL_DOF] = [
         motor_id: 0x04,
         feedback_id: 0x14,
         model: "4310",
+        vendor: "damiao",
         mit_kp: 18.0,
         mit_kd: 2.0,
+        vel_kp: 0.0,
+        vel_ki: 0.0,
+        pos_kp: 0.0,
+        pos_ki: 0.0,
         vlim: 2.617_993_8,
     },
     JointSpec {
@@ -109,8 +139,13 @@ pub const B601_JOINTS: [JointSpec; ALL_DOF] = [
         motor_id: 0x05,
         feedback_id: 0x15,
         model: "4310",
+        vendor: "damiao",
         mit_kp: 18.0,
         mit_kd: 2.0,
+        vel_kp: 0.0,
+        vel_ki: 0.0,
+        pos_kp: 0.0,
+        pos_ki: 0.0,
         vlim: 2.617_993_8,
     },
     JointSpec {
@@ -118,8 +153,13 @@ pub const B601_JOINTS: [JointSpec; ALL_DOF] = [
         motor_id: 0x06,
         feedback_id: 0x16,
         model: "4310",
+        vendor: "damiao",
         mit_kp: 18.0,
         mit_kd: 2.0,
+        vel_kp: 0.0,
+        vel_ki: 0.0,
+        pos_kp: 0.0,
+        pos_ki: 0.0,
         vlim: 2.617_993_8,
     },
     JointSpec {
@@ -127,11 +167,83 @@ pub const B601_JOINTS: [JointSpec; ALL_DOF] = [
         motor_id: 0x07,
         feedback_id: 0x17,
         model: "4310",
+        vendor: "damiao",
         mit_kp: 8.0,
         mit_kd: 1.0,
+        vel_kp: 0.0,
+        vel_ki: 0.0,
+        pos_kp: 0.0,
+        pos_ki: 0.0,
         vlim: 5.235_987_7,
     },
 ];
+
+#[derive(Debug, Clone, Copy)]
+pub enum ControlMode {
+    Mit,
+    PosVel,
+    Vel,
+    ForcePos,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct MotorFeedbackState {
+    pub status_code: u8,
+    pub pos: f32,
+    pub vel: f32,
+    pub torq: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct ArmConfig {
+    pub channel: String,
+    pub urdf_path: Option<PathBuf>,
+    pub joints: Vec<JointSpec>,
+}
+
+#[derive(Default)]
+struct JointBuilder {
+    name: Option<String>,
+    motor_id: Option<u16>,
+    feedback_id: Option<u16>,
+    model: Option<String>,
+    vendor: Option<String>,
+    mit_kp: Option<f32>,
+    mit_kd: Option<f32>,
+    vel_kp: Option<f32>,
+    vel_ki: Option<f32>,
+    pos_kp: Option<f32>,
+    pos_ki: Option<f32>,
+    vlim: Option<f32>,
+}
+
+impl JointBuilder {
+    fn is_empty(&self) -> bool {
+        self.name.is_none() && self.motor_id.is_none() && self.feedback_id.is_none()
+    }
+
+    fn build(self) -> Result<JointSpec, Box<dyn Error>> {
+        Ok(JointSpec {
+            name: Box::leak(self.name.ok_or("joint missing name")?.into_boxed_str()),
+            motor_id: self.motor_id.ok_or("joint missing motor_id")?,
+            feedback_id: self.feedback_id.ok_or("joint missing feedback_id")?,
+            model: Box::leak(self.model.unwrap_or_else(|| "4340P".to_string()).into_boxed_str()),
+            vendor: Box::leak(
+                self.vendor
+                    .unwrap_or_else(|| "damiao".to_string())
+                    .to_ascii_lowercase()
+                    .into_boxed_str(),
+            ),
+            mit_kp: self.mit_kp.unwrap_or(0.0),
+            mit_kd: self.mit_kd.unwrap_or(0.0),
+            vel_kp: self.vel_kp.unwrap_or(0.0),
+            vel_ki: self.vel_ki.unwrap_or(0.0),
+            pos_kp: self.pos_kp.unwrap_or(0.0),
+            pos_ki: self.pos_ki.unwrap_or(0.0),
+            vlim: self.vlim.unwrap_or(2.0),
+        })
+    }
+}
 
 pub fn arg_value(args: &[String], name: &str) -> Option<String> {
     let prefix = format!("{name}=");
@@ -145,6 +257,156 @@ pub fn arg_value(args: &[String], name: &str) -> Option<String> {
         }
     }
     None
+}
+
+pub fn default_config_path() -> PathBuf {
+    repo_root().join(DEFAULT_CONFIG_REL)
+}
+
+pub fn parse_config_path(args: &[String]) -> Option<PathBuf> {
+    arg_value(args, "--config")
+        .or_else(|| arg_value(args, "-c"))
+        .map(PathBuf::from)
+}
+
+fn resolve_repo_path(path: impl AsRef<Path>, base: Option<&Path>) -> PathBuf {
+    let path = path.as_ref();
+    if path.is_absolute() {
+        return path.to_path_buf();
+    }
+    let mut candidates = Vec::new();
+    if let Some(base) = base {
+        candidates.push(base.join(path));
+    }
+    candidates.push(repo_root().join(path));
+    candidates.push(env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path));
+    candidates.push(path.to_path_buf());
+    candidates
+        .into_iter()
+        .find(|candidate| candidate.exists())
+        .unwrap_or_else(|| path.to_path_buf())
+}
+
+fn yaml_scalar(value: &str) -> String {
+    let mut value = value.split('#').next().unwrap_or("").trim().to_string();
+    if value.len() >= 2 {
+        let bytes = value.as_bytes();
+        if (bytes[0] == b'"' && bytes[value.len() - 1] == b'"')
+            || (bytes[0] == b'\'' && bytes[value.len() - 1] == b'\'')
+        {
+            value = value[1..value.len() - 1].to_string();
+        }
+    }
+    value
+}
+
+fn yaml_value(line: &str) -> Option<(&str, String)> {
+    let stripped = line.trim();
+    let (key, value) = stripped.split_once(':')?;
+    Some((key.trim(), yaml_scalar(value)))
+}
+
+fn parse_yaml_id(value: &str) -> Result<u16, Box<dyn Error>> {
+    let value = value.trim();
+    if let Some(hex) = value.strip_prefix("0x").or_else(|| value.strip_prefix("0X")) {
+        Ok(u16::from_str_radix(hex, 16)?)
+    } else {
+        Ok(value.parse()?)
+    }
+}
+
+fn finalize_joint(builder: &mut JointBuilder, joints: &mut Vec<JointSpec>) -> Result<(), Box<dyn Error>> {
+    if builder.is_empty() {
+        return Ok(());
+    }
+    let current = std::mem::take(builder);
+    joints.push(current.build()?);
+    Ok(())
+}
+
+pub fn load_arm_config(args: &[String]) -> Result<ArmConfig, Box<dyn Error>> {
+    let Some(path) = parse_config_path(args) else {
+        return Ok(ArmConfig {
+            channel: DEFAULT_PORT.to_string(),
+            urdf_path: Some(default_urdf_path()),
+            joints: B601_JOINTS.to_vec(),
+        });
+    };
+    let path = resolve_repo_path(path, None);
+    let base = path.parent();
+    let text = fs::read_to_string(&path)?;
+    let mut channel = DEFAULT_PORT.to_string();
+    let mut urdf_path: Option<PathBuf> = None;
+    let mut joints = Vec::new();
+    let mut current = JointBuilder::default();
+    let mut section = "";
+
+    for line in text.lines() {
+        let raw = line.split('#').next().unwrap_or("");
+        if raw.trim().is_empty() {
+            continue;
+        }
+        let indent = raw.len() - raw.trim_start().len();
+        let stripped = raw.trim();
+
+        if indent == 0 {
+            if let Some((key, value)) = yaml_value(stripped) {
+                match key {
+                    "channel" => channel = value,
+                    "urdf_path" => urdf_path = Some(resolve_repo_path(value, base)),
+                    _ => {}
+                }
+            }
+            continue;
+        }
+
+        if stripped.starts_with("- name:") {
+            finalize_joint(&mut current, &mut joints)?;
+            current.name = Some(yaml_scalar(stripped.trim_start_matches("- name:")));
+            section = "";
+            continue;
+        }
+
+        if stripped == "MIT:" {
+            section = "MIT";
+            continue;
+        }
+        if stripped == "POS_VEL:" {
+            section = "POS_VEL";
+            continue;
+        }
+
+        let Some((key, value)) = yaml_value(stripped) else {
+            continue;
+        };
+        match (section, key) {
+            ("MIT", "kp") => current.mit_kp = value.parse().ok(),
+            ("MIT", "kd") => current.mit_kd = value.parse().ok(),
+            ("POS_VEL", "vel_kp") => current.vel_kp = value.parse().ok(),
+            ("POS_VEL", "vel_ki") => current.vel_ki = value.parse().ok(),
+            ("POS_VEL", "pos_kp") => current.pos_kp = value.parse().ok(),
+            ("POS_VEL", "pos_ki") => current.pos_ki = value.parse().ok(),
+            ("POS_VEL", "vlim") => current.vlim = value.parse().ok(),
+            (_, "motor_id") => current.motor_id = Some(parse_yaml_id(&value)?),
+            (_, "feedback_id") => current.feedback_id = Some(parse_yaml_id(&value)?),
+            (_, "model") => current.model = Some(value),
+            (_, "vendor") => current.vendor = Some(value),
+            _ => {}
+        }
+    }
+    finalize_joint(&mut current, &mut joints)?;
+    if joints.is_empty() {
+        return Err(format!("{} does not contain joints", path.display()).into());
+    }
+    Ok(ArmConfig {
+        channel,
+        urdf_path,
+        joints,
+    })
+}
+
+pub fn arm_joints(args: &[String]) -> Result<Vec<JointSpec>, Box<dyn Error>> {
+    Ok(load_arm_config(args)?.joints)
 }
 
 pub fn arg_values(args: &[String], name: &str) -> Vec<String> {
@@ -170,6 +432,7 @@ pub fn has_flag(args: &[String], name: &str) -> bool {
 pub fn parse_port(args: &[String]) -> String {
     arg_value(args, "--port")
         .or_else(|| arg_value(args, "-p"))
+        .or_else(|| load_arm_config(args).ok().map(|cfg| cfg.channel))
         .unwrap_or_else(|| DEFAULT_PORT.to_string())
 }
 
@@ -207,10 +470,15 @@ pub fn parse_joint(value: &str) -> Result<usize, Box<dyn Error>> {
             return Ok(one_based - 1);
         }
     }
-    B601_JOINTS
+    current_joints_or_default()
         .iter()
         .position(|joint| joint.name == value)
         .ok_or_else(|| format!("unknown joint: {value}").into())
+}
+
+fn current_joints_or_default() -> Vec<JointSpec> {
+    let args: Vec<String> = env::args().skip(1).collect();
+    arm_joints(&args).unwrap_or_else(|_| B601_JOINTS.to_vec())
 }
 
 pub fn parse_floats(line: &str) -> Result<Vec<f64>, Box<dyn Error>> {
@@ -253,6 +521,7 @@ pub fn default_urdf_path() -> PathBuf {
 pub fn parse_urdf_path(args: &[String]) -> PathBuf {
     arg_value(args, "--urdf")
         .map(PathBuf::from)
+        .or_else(|| load_arm_config(args).ok().and_then(|cfg| cfg.urdf_path))
         .unwrap_or_else(default_urdf_path)
 }
 
@@ -277,14 +546,17 @@ pub fn gravity_urdf_for_gripper(
     use_gripper: bool,
 ) -> Result<(PathBuf, Option<TemporaryUrdf>, f64), Box<dyn Error>> {
     let explicit_urdf = arg_value(args, "--urdf");
+    let config_urdf = load_arm_config(args).ok().and_then(|cfg| cfg.urdf_path);
     let base_urdf = explicit_urdf
         .as_ref()
         .map(PathBuf::from)
+        .or(config_urdf)
         .unwrap_or_else(default_urdf_path);
+    let has_explicit_or_config_urdf = explicit_urdf.is_some() || parse_config_path(args).is_some();
     let scale = if let Some(value) = arg_value(args, "--end-link-load-scale") {
         value.parse::<f64>()?
     } else if use_gripper {
-        if explicit_urdf.is_some() {
+        if has_explicit_or_config_urdf {
             1.0
         } else {
             END_LINK_LOAD_SCALE_WITH_GRIPPER
@@ -292,11 +564,22 @@ pub fn gravity_urdf_for_gripper(
     } else {
         0.0
     };
-    if (scale - 1.0).abs() <= f64::EPSILON {
+    if (scale - 1.0).abs() <= f64::EPSILON || !has_end_link_inertial(&base_urdf)? {
         return Ok((base_urdf, None, scale));
     }
     let temp = end_link_load_urdf(&base_urdf, scale)?;
     Ok((temp.path().to_path_buf(), Some(temp), scale))
+}
+
+fn has_end_link_inertial(urdf_path: &Path) -> Result<bool, Box<dyn Error>> {
+    let xml = fs::read_to_string(urdf_path)?;
+    let Some(end_link_pos) = xml
+        .find("name=\"end_link\"")
+        .or_else(|| xml.find("name='end_link'"))
+    else {
+        return Ok(false);
+    };
+    Ok(xml[end_link_pos..].find("<inertial").is_some())
 }
 
 fn end_link_load_urdf(urdf_path: &Path, scale: f64) -> Result<TemporaryUrdf, Box<dyn Error>> {
@@ -416,6 +699,246 @@ fn format_float(value: f64) -> String {
     text
 }
 
+enum ExampleController {
+    Damiao(DamiaoController),
+    Robstride(RobstrideController),
+}
+
+impl ExampleController {
+    fn open(port: &str, vendor: &str) -> Result<Self, Box<dyn Error>> {
+        let lower = port.to_ascii_lowercase();
+        match vendor {
+            "damiao" => {
+                if port.starts_with("/dev/") || lower.starts_with("com") {
+                    Ok(Self::Damiao(DamiaoController::new_dm_serial(port, 921_600)?))
+                } else {
+                    Ok(Self::Damiao(DamiaoController::new_socketcan(port)?))
+                }
+            }
+            "robstride" => {
+                if port.starts_with("/dev/") || lower.starts_with("com") {
+                    Err(format!("RobStride requires a CAN channel, got {port}").into())
+                } else {
+                    Ok(Self::Robstride(RobstrideController::new_socketcan(port)?))
+                }
+            }
+            other => Err(format!("unsupported example vendor: {other}").into()),
+        }
+    }
+
+    fn add_motor(&self, joint: &JointSpec) -> Result<ExampleMotor, Box<dyn Error>> {
+        match self {
+            ExampleController::Damiao(controller) => Ok(ExampleMotor::Damiao(controller.add_motor(
+                joint.motor_id,
+                joint.feedback_id,
+                joint.model,
+            )?)),
+            ExampleController::Robstride(controller) => Ok(ExampleMotor::Robstride(
+                controller.add_motor(joint.motor_id, joint.feedback_id, joint.model)?,
+            )),
+        }
+    }
+
+    fn enable_all(&self) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleController::Damiao(controller) => Ok(controller.enable_all()?),
+            ExampleController::Robstride(controller) => Ok(controller.enable_all()?),
+        }
+    }
+
+    fn disable_all(&self) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleController::Damiao(controller) => Ok(controller.disable_all()?),
+            ExampleController::Robstride(controller) => Ok(controller.disable_all()?),
+        }
+    }
+
+    fn poll_feedback_once(&self) {
+        match self {
+            ExampleController::Damiao(controller) => {
+                let _ = controller.poll_feedback_once();
+            }
+            ExampleController::Robstride(controller) => {
+                let _ = controller.poll_feedback_once();
+            }
+        }
+    }
+
+    fn shutdown(&self) {
+        match self {
+            ExampleController::Damiao(controller) => {
+                let _ = controller.shutdown();
+            }
+            ExampleController::Robstride(controller) => {
+                let _ = controller.shutdown();
+            }
+        }
+    }
+
+    fn close_bus(&self) {
+        match self {
+            ExampleController::Damiao(controller) => {
+                let _ = controller.close_bus();
+            }
+            ExampleController::Robstride(controller) => {
+                let _ = controller.close_bus();
+            }
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum ExampleMotor {
+    Damiao(Arc<DamiaoMotor>),
+    Robstride(Arc<RobstrideMotor>),
+}
+
+impl ExampleMotor {
+    pub fn vendor(&self) -> &'static str {
+        match self {
+            ExampleMotor::Damiao(_) => "damiao",
+            ExampleMotor::Robstride(_) => "robstride",
+        }
+    }
+
+    fn clear_error(&self) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => Ok(motor.clear_error()?),
+            ExampleMotor::Robstride(motor) => Ok(motor.clear_error()?),
+        }
+    }
+
+    pub fn disable(&self) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => Ok(motor.disable()?),
+            ExampleMotor::Robstride(motor) => Ok(motor.disable()?),
+        }
+    }
+
+    pub fn set_zero_position(&self) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => Ok(motor.set_zero_position()?),
+            ExampleMotor::Robstride(motor) => Ok(motor.set_zero_position()?),
+        }
+    }
+
+    pub fn ensure_control_mode(
+        &self,
+        mode: ControlMode,
+        timeout: Duration,
+    ) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => {
+                let mode = match mode {
+                    ControlMode::Mit => DamiaoMode::Mit,
+                    ControlMode::PosVel => DamiaoMode::PosVel,
+                    ControlMode::Vel => DamiaoMode::Vel,
+                    ControlMode::ForcePos => DamiaoMode::ForcePos,
+                };
+                Ok(motor.ensure_control_mode(mode, timeout)?)
+            }
+            ExampleMotor::Robstride(motor) => {
+                let mode = match mode {
+                    ControlMode::Mit => RobstrideMode::Mit,
+                    ControlMode::PosVel => RobstrideMode::Position,
+                    ControlMode::Vel => RobstrideMode::Velocity,
+                    ControlMode::ForcePos => {
+                        return Err("RobStride does not support FORCE_POS mode".into())
+                    }
+                };
+                Ok(motor.ensure_control_mode(mode, timeout)?)
+            }
+        }
+    }
+
+    pub fn request_motor_feedback(&self) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => Ok(motor.request_motor_feedback()?),
+            ExampleMotor::Robstride(_) => Ok(()),
+        }
+    }
+
+    pub fn latest_state(&self) -> Option<MotorFeedbackState> {
+        match self {
+            ExampleMotor::Damiao(motor) => motor.latest_state().map(|s| MotorFeedbackState {
+                status_code: s.status_code,
+                pos: s.pos,
+                vel: s.vel,
+                torq: s.torq,
+            }),
+            ExampleMotor::Robstride(motor) => motor.latest_state().map(|s| MotorFeedbackState {
+                status_code: u8::from(s.undervoltage)
+                    | (u8::from(s.overcurrent) << 1)
+                    | (u8::from(s.overtemperature) << 2)
+                    | (u8::from(s.magnetic_encoder_fault) << 3)
+                    | (u8::from(s.stall) << 4)
+                    | (u8::from(s.uncalibrated) << 5),
+                pos: s.position,
+                vel: s.velocity,
+                torq: s.torque,
+            }),
+        }
+    }
+
+    pub fn send_cmd_mit(
+        &self,
+        pos: f32,
+        vel: f32,
+        kp: f32,
+        kd: f32,
+        tau: f32,
+    ) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => Ok(motor.send_cmd_mit(pos, vel, kp, kd, tau)?),
+            ExampleMotor::Robstride(motor) => Ok(motor.send_cmd_mit(pos, vel, kp, kd, tau)?),
+        }
+    }
+
+    pub fn send_cmd_pos_vel(&self, pos: f32, vlim: f32) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => Ok(motor.send_cmd_pos_vel(pos, vlim)?),
+            ExampleMotor::Robstride(motor) => {
+                motor.set_mode(RobstrideMode::Position)?;
+                let v = vlim.abs();
+                if v.is_finite() && v > 0.0 {
+                    motor.write_parameter(0x7017, RobstrideParameterValue::F32(v))?;
+                }
+                motor.write_parameter(0x7016, RobstrideParameterValue::F32(pos))?;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn send_cmd_vel(&self, vel: f32) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => Ok(motor.send_cmd_vel(vel)?),
+            ExampleMotor::Robstride(motor) => {
+                motor.set_mode(RobstrideMode::Velocity)?;
+                motor.set_velocity_target(vel)?;
+                Ok(())
+            }
+        }
+    }
+
+    pub fn send_cmd_force_pos(
+        &self,
+        pos: f32,
+        vlim: f32,
+        ratio: f32,
+    ) -> Result<(), Box<dyn Error>> {
+        match self {
+            ExampleMotor::Damiao(motor) => Ok(motor.send_cmd_force_pos(pos, vlim, ratio)?),
+            ExampleMotor::Robstride(_) => Err("RobStride does not support FORCE_POS commands".into()),
+        }
+    }
+
+    fn set_active_report(&self, enabled: bool) {
+        if let ExampleMotor::Robstride(motor) = self {
+            let _ = motor.set_active_report(enabled);
+        }
+    }
+}
+
 pub fn open_controller(port: &str) -> Result<DamiaoController, Box<dyn Error>> {
     let lower = port.to_ascii_lowercase();
     if port.starts_with("/dev/") || lower.starts_with("com") {
@@ -427,21 +950,39 @@ pub fn open_controller(port: &str) -> Result<DamiaoController, Box<dyn Error>> {
 
 pub struct B601Arm {
     pub port: String,
-    controller: DamiaoController,
-    pub motors: Vec<Arc<DamiaoMotor>>,
+    controller: ExampleController,
+    pub motors: Vec<ExampleMotor>,
+    pub joints: Vec<JointSpec>,
 }
 
 impl B601Arm {
     pub fn open(port: &str) -> Result<Self, Box<dyn Error>> {
-        let controller = open_controller(port)?;
-        let mut motors = Vec::with_capacity(B601_JOINTS.len());
-        for joint in B601_JOINTS {
-            motors.push(controller.add_motor(joint.motor_id, joint.feedback_id, joint.model)?);
+        let args: Vec<String> = env::args().skip(1).collect();
+        Self::open_with_args(port, &args)
+    }
+
+    pub fn open_with_args(port: &str, args: &[String]) -> Result<Self, Box<dyn Error>> {
+        let joints = arm_joints(args)?;
+        let vendor = joints
+            .first()
+            .map(|joint| joint.vendor)
+            .ok_or("empty joint config")?;
+        if joints.iter().any(|joint| joint.vendor != vendor) {
+            return Err("Rust examples currently expect a single vendor per arm config".into());
+        }
+        let controller = ExampleController::open(port, vendor)?;
+        let mut motors = Vec::with_capacity(joints.len());
+        for joint in &joints {
+            motors.push(controller.add_motor(joint)?);
+        }
+        for motor in &motors {
+            motor.set_active_report(true);
         }
         Ok(Self {
             port: port.to_string(),
             controller,
             motors,
+            joints,
         })
     }
 
@@ -461,13 +1002,13 @@ impl B601Arm {
     pub fn close(&self) {
         let _ = self.controller.disable_all();
         thread::sleep(Duration::from_millis(20));
-        let _ = self.controller.shutdown();
-        let _ = self.controller.close_bus();
+        self.controller.shutdown();
+        self.controller.close_bus();
     }
 
     pub fn ensure_all_mode(&self, mode: ControlMode) {
         let timeout = Duration::from_millis(300);
-        for (joint, motor) in B601_JOINTS.iter().zip(&self.motors) {
+        for (joint, motor) in self.joints.iter().zip(&self.motors) {
             if let Err(err) = motor.ensure_control_mode(mode, timeout) {
                 eprintln!("warning: {} mode switch failed: {err}", joint.name);
             }
@@ -476,7 +1017,7 @@ impl B601Arm {
 
     pub fn ensure_arm_mode(&self, mode: ControlMode) {
         let timeout = Duration::from_millis(300);
-        for (joint, motor) in B601_JOINTS.iter().zip(&self.motors).take(ARM_DOF) {
+        for (joint, motor) in self.joints.iter().zip(&self.motors).take(ARM_DOF) {
             if let Err(err) = motor.ensure_control_mode(mode, timeout) {
                 eprintln!("warning: {} mode switch failed: {err}", joint.name);
             }
@@ -487,7 +1028,9 @@ impl B601Arm {
         for motor in &self.motors {
             let _ = motor.request_motor_feedback();
         }
+        self.controller.poll_feedback_once();
         thread::sleep(Duration::from_millis(20));
+        self.controller.poll_feedback_once();
     }
 
     pub fn states(&self) -> Vec<Option<MotorFeedbackState>> {
@@ -499,10 +1042,15 @@ impl B601Arm {
     }
 
     pub fn positions_or_zero(&self) -> Vec<f32> {
-        self.states()
+        let mut out: Vec<f32> = self
+            .states()
             .into_iter()
             .map(|state| state.map(|s| s.pos).unwrap_or(0.0))
-            .collect()
+            .collect();
+        while out.len() < ALL_DOF {
+            out.push(0.0);
+        }
+        out
     }
 
     pub fn arm_positions_or_zero(&self) -> [f64; ARM_DOF] {
@@ -519,7 +1067,7 @@ impl B601Arm {
     }
 
     pub fn print_state(&self) {
-        for (joint, state) in B601_JOINTS.iter().zip(self.states()) {
+        for (joint, state) in self.joints.iter().zip(self.states()) {
             match state {
                 Some(s) => println!(
                     "{:<14} pos={:>8.2} deg vel={:>8.2} deg/s torque={:>8.3} status={}",
@@ -527,7 +1075,7 @@ impl B601Arm {
                     rad_to_deg_f32(s.pos),
                     rad_to_deg_f32(s.vel),
                     s.torq,
-                    s.status_name
+                    s.status_code
                 ),
                 None => println!("{:<14} no feedback", joint.name),
             }
@@ -546,8 +1094,8 @@ impl B601Arm {
             self.motors[idx].send_cmd_mit(
                 pos.get(idx).copied().unwrap_or(0.0),
                 vel.get(idx).copied().unwrap_or(0.0),
-                kp.get(idx).copied().unwrap_or(B601_JOINTS[idx].mit_kp),
-                kd.get(idx).copied().unwrap_or(B601_JOINTS[idx].mit_kd),
+                kp.get(idx).copied().unwrap_or(self.joints[idx].mit_kp),
+                kd.get(idx).copied().unwrap_or(self.joints[idx].mit_kd),
                 tau.get(idx).copied().unwrap_or(0.0),
             )?;
         }
@@ -558,7 +1106,7 @@ impl B601Arm {
         for idx in 0..self.motors.len() {
             self.motors[idx].send_cmd_pos_vel(
                 pos.get(idx).copied().unwrap_or(0.0),
-                vlim.get(idx).copied().unwrap_or(B601_JOINTS[idx].vlim),
+                vlim.get(idx).copied().unwrap_or(self.joints[idx].vlim),
             )?;
         }
         Ok(())
@@ -573,15 +1121,24 @@ pub fn sleep_to_rate(start: Instant, rate_hz: f64) {
 }
 
 pub fn default_kp() -> Vec<f32> {
-    B601_JOINTS.iter().map(|joint| joint.mit_kp).collect()
+    current_joints_or_default()
+        .iter()
+        .map(|joint| joint.mit_kp)
+        .collect()
 }
 
 pub fn default_kd() -> Vec<f32> {
-    B601_JOINTS.iter().map(|joint| joint.mit_kd).collect()
+    current_joints_or_default()
+        .iter()
+        .map(|joint| joint.mit_kd)
+        .collect()
 }
 
 pub fn default_vlim() -> Vec<f32> {
-    B601_JOINTS.iter().map(|joint| joint.vlim).collect()
+    current_joints_or_default()
+        .iter()
+        .map(|joint| joint.vlim)
+        .collect()
 }
 
 pub fn move_pos_vel_path(
@@ -621,9 +1178,13 @@ pub fn run_single_motor_console() -> Result<(), Box<dyn Error>> {
         .unwrap_or_else(|| "0".to_string());
     let joint_idx = parse_joint(&joint_arg)?;
     let arm = B601Arm::open(&port)?;
+    let joint = arm
+        .joints
+        .get(joint_idx)
+        .ok_or_else(|| format!("joint index {joint_idx} out of range"))?;
 
     println!("connected: B601 on {}", arm.port);
-    println!("joint: {} ({})", joint_idx, B601_JOINTS[joint_idx].name);
+    println!("joint: {} ({})", joint_idx, joint.name);
     println!(
         "commands: enable / disable / set_zero / mode / mit / posvel / vel / forcepos / state / q"
     );
@@ -663,7 +1224,7 @@ pub fn run_single_motor_console() -> Result<(), Box<dyn Error>> {
             if prompt("confirm> ")?.as_deref() == Some("YES") {
                 arm.motors[joint_idx].disable()?;
                 arm.motors[joint_idx].set_zero_position()?;
-                println!("zero set for {}", B601_JOINTS[joint_idx].name);
+                println!("zero set for {}", joint.name);
             }
             continue;
         }
@@ -685,7 +1246,7 @@ pub fn run_single_motor_console() -> Result<(), Box<dyn Error>> {
                         continue;
                     }
                 }
-                println!("mode set for {}", B601_JOINTS[joint_idx].name);
+                println!("mode set for {}", joint.name);
             }
             Some("mit") if parts.len() >= 2 => {
                 let pos = deg_to_rad_f32(parts[1].parse()?);
@@ -693,11 +1254,11 @@ pub fn run_single_motor_console() -> Result<(), Box<dyn Error>> {
                 let kp = parts
                     .get(3)
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(B601_JOINTS[joint_idx].mit_kp);
+                    .unwrap_or(joint.mit_kp);
                 let kd = parts
                     .get(4)
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(B601_JOINTS[joint_idx].mit_kd);
+                    .unwrap_or(joint.mit_kd);
                 let tau = parts.get(5).and_then(|v| v.parse().ok()).unwrap_or(0.0);
                 target[joint_idx] = pos;
                 arm.motors[joint_idx].send_cmd_mit(pos, vel, kp, kd, tau)?;
@@ -708,7 +1269,7 @@ pub fn run_single_motor_console() -> Result<(), Box<dyn Error>> {
                 let vlim = parts
                     .get(2)
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(B601_JOINTS[joint_idx].vlim);
+                    .unwrap_or(joint.vlim);
                 target[joint_idx] = pos;
                 arm.motors[joint_idx].send_cmd_pos_vel(pos, vlim)?;
                 println!(
@@ -726,7 +1287,7 @@ pub fn run_single_motor_console() -> Result<(), Box<dyn Error>> {
                 let vlim = parts
                     .get(2)
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(B601_JOINTS[joint_idx].vlim);
+                    .unwrap_or(joint.vlim);
                 let ratio = parts.get(3).and_then(|v| v.parse().ok()).unwrap_or(0.05);
                 target[joint_idx] = pos;
                 arm.motors[joint_idx].send_cmd_force_pos(pos, vlim, ratio)?;

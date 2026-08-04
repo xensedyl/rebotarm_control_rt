@@ -41,20 +41,25 @@ struct JointSpec {
   uint16_t motor_id;
   uint16_t feedback_id;
   const char* model;
+  const char* vendor;
   float mit_kp;
   float mit_kd;
+  float vel_kp;
+  float vel_ki;
+  float pos_kp;
+  float pos_ki;
   float vlim;
 };
 
 inline const std::vector<JointSpec>& b601_joints() {
   static const std::vector<JointSpec> joints = {
-      {"shoulder_pan", 0x01, 0x11, "4340P", 120.0f, 8.0f, 2.6179938f},
-      {"shoulder_lift", 0x02, 0x12, "4340P", 120.0f, 8.0f, 2.6179938f},
-      {"elbow_flex", 0x03, 0x13, "4340P", 120.0f, 8.0f, 2.6179938f},
-      {"wrist_flex", 0x04, 0x14, "4310", 18.0f, 2.0f, 2.6179938f},
-      {"wrist_yaw", 0x05, 0x15, "4310", 18.0f, 2.0f, 2.6179938f},
-      {"wrist_roll", 0x06, 0x16, "4310", 18.0f, 2.0f, 2.6179938f},
-      {"gripper", 0x07, 0x17, "4310", 8.0f, 1.0f, 5.2359877f},
+      {"shoulder_pan", 0x01, 0x11, "4340P", "damiao", 120.0f, 8.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.6179938f},
+      {"shoulder_lift", 0x02, 0x12, "4340P", "damiao", 120.0f, 8.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.6179938f},
+      {"elbow_flex", 0x03, 0x13, "4340P", "damiao", 120.0f, 8.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.6179938f},
+      {"wrist_flex", 0x04, 0x14, "4310", "damiao", 18.0f, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.6179938f},
+      {"wrist_yaw", 0x05, 0x15, "4310", "damiao", 18.0f, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.6179938f},
+      {"wrist_roll", 0x06, 0x16, "4310", "damiao", 18.0f, 2.0f, 0.0f, 0.0f, 0.0f, 0.0f, 2.6179938f},
+      {"gripper", 0x07, 0x17, "4310", "damiao", 8.0f, 1.0f, 0.0f, 0.0f, 0.0f, 0.0f, 5.2359877f},
   };
   return joints;
 }
@@ -95,8 +100,25 @@ inline std::string repo_root() {
 
 inline std::string default_urdf_path() {
   return repo_root() +
-         "/urdf/reBot-DevArm_fixend_description/urdf/"
+         "/python/rebotarm_control_rt/urdf/reBot-DevArm_fixend_description/urdf/"
          "reBot-DevArm_fixend.urdf";
+}
+
+struct ExampleConfig {
+  std::string channel = kDefaultPort;
+  std::string urdf_path;
+  std::vector<JointSpec> joints = b601_joints();
+};
+
+struct JointSpecStorage {
+  std::vector<std::string> names;
+  std::vector<std::string> models;
+  std::vector<std::string> vendors;
+};
+
+inline JointSpecStorage& joint_spec_storage() {
+  static JointSpecStorage storage;
+  return storage;
 }
 
 inline std::string arg_value(int argc, char** argv, const std::string& name,
@@ -131,10 +153,179 @@ inline bool has_flag(int argc, char** argv, const std::string& name) {
   return false;
 }
 
+inline std::string strip_yaml_scalar(std::string value) {
+  const auto comment = value.find('#');
+  if (comment != std::string::npos) value.resize(comment);
+  const auto begin = value.find_first_not_of(" \t\r\n");
+  if (begin == std::string::npos) return "";
+  const auto end = value.find_last_not_of(" \t\r\n");
+  value = value.substr(begin, end - begin + 1);
+  if (value.size() >= 2 &&
+      ((value.front() == '"' && value.back() == '"') ||
+       (value.front() == '\'' && value.back() == '\''))) {
+    value = value.substr(1, value.size() - 2);
+  }
+  return value;
+}
+
+inline std::optional<std::pair<std::string, std::string>> yaml_key_value(const std::string& line) {
+  const std::string stripped = strip_yaml_scalar(line);
+  const auto pos = stripped.find(':');
+  if (pos == std::string::npos) return std::nullopt;
+  return std::make_pair(strip_yaml_scalar(stripped.substr(0, pos)),
+                        strip_yaml_scalar(stripped.substr(pos + 1)));
+}
+
+inline uint16_t parse_yaml_id(const std::string& value) {
+  const std::string v = strip_yaml_scalar(value);
+  if (v.rfind("0x", 0) == 0 || v.rfind("0X", 0) == 0) {
+    return static_cast<uint16_t>(std::stoul(v, nullptr, 16));
+  }
+  return static_cast<uint16_t>(std::stoul(v));
+}
+
+inline int indent_width(const std::string& line) {
+  int n = 0;
+  while (n < static_cast<int>(line.size()) && (line[n] == ' ' || line[n] == '\t')) ++n;
+  return n;
+}
+
+inline std::string resolve_repo_path(const std::string& path, const std::string& base = "") {
+  if (path.empty()) return path;
+  std::filesystem::path p(path);
+  if (p.is_absolute()) return p.string();
+  std::vector<std::filesystem::path> candidates;
+  if (!base.empty()) candidates.push_back(std::filesystem::path(base) / p);
+  candidates.push_back(std::filesystem::path(repo_root()) / p);
+  candidates.push_back(std::filesystem::current_path() / p);
+  candidates.push_back(p);
+  for (const auto& candidate : candidates) {
+    if (std::filesystem::exists(candidate)) return candidate.string();
+  }
+  return candidates.front().string();
+}
+
+struct JointBuilder {
+  std::string name;
+  uint16_t motor_id = 0;
+  uint16_t feedback_id = 0;
+  std::string model = "4340P";
+  std::string vendor = "damiao";
+  float mit_kp = 0.0f;
+  float mit_kd = 0.0f;
+  float vel_kp = 0.0f;
+  float vel_ki = 0.0f;
+  float pos_kp = 0.0f;
+  float pos_ki = 0.0f;
+  float vlim = 2.0f;
+  bool started = false;
+};
+
+inline void append_joint_spec(JointBuilder& builder, std::vector<JointSpec>& joints) {
+  if (!builder.started) return;
+  if (builder.name.empty() || builder.motor_id == 0) {
+    throw std::runtime_error("invalid YAML joint entry");
+  }
+  auto& storage = joint_spec_storage();
+  storage.names.push_back(builder.name);
+  storage.models.push_back(builder.model);
+  storage.vendors.push_back(builder.vendor);
+  joints.push_back(JointSpec{
+      storage.names.back().c_str(),
+      builder.motor_id,
+      builder.feedback_id,
+      storage.models.back().c_str(),
+      storage.vendors.back().c_str(),
+      builder.mit_kp,
+      builder.mit_kd,
+      builder.vel_kp,
+      builder.vel_ki,
+      builder.pos_kp,
+      builder.pos_ki,
+      builder.vlim,
+  });
+  builder = JointBuilder{};
+}
+
+inline ExampleConfig load_example_config(int argc, char** argv) {
+  ExampleConfig cfg;
+  const std::string config_arg = arg_value(argc, argv, "--config", arg_value(argc, argv, "-c"));
+  if (config_arg.empty()) return cfg;
+
+  const std::string config_path = resolve_repo_path(config_arg);
+  const std::filesystem::path base = std::filesystem::path(config_path).parent_path();
+  std::ifstream input(config_path);
+  if (!input) throw std::runtime_error("failed to open config: " + config_path);
+
+  std::vector<JointSpec> joints;
+  JointBuilder current;
+  std::string section;
+  std::string line;
+  while (std::getline(input, line)) {
+    const auto comment = line.find('#');
+    const std::string raw = comment == std::string::npos ? line : line.substr(0, comment);
+    if (strip_yaml_scalar(raw).empty()) continue;
+    const int indent = indent_width(raw);
+    const std::string stripped = strip_yaml_scalar(raw);
+
+    if (indent == 0) {
+      if (auto kv = yaml_key_value(stripped)) {
+        if (kv->first == "channel") cfg.channel = kv->second;
+        else if (kv->first == "urdf_path") cfg.urdf_path = resolve_repo_path(kv->second, base.string());
+      }
+      continue;
+    }
+
+    if (stripped.rfind("- name:", 0) == 0) {
+      append_joint_spec(current, joints);
+      current.started = true;
+      current.name = strip_yaml_scalar(stripped.substr(std::string("- name:").size()));
+      section.clear();
+      continue;
+    }
+    if (stripped == "MIT:") {
+      section = "MIT";
+      continue;
+    }
+    if (stripped == "POS_VEL:") {
+      section = "POS_VEL";
+      continue;
+    }
+    const auto kv = yaml_key_value(stripped);
+    if (!kv) continue;
+    const auto& key = kv->first;
+    const auto& value = kv->second;
+    if (section == "MIT" && key == "kp") current.mit_kp = std::stof(value);
+    else if (section == "MIT" && key == "kd") current.mit_kd = std::stof(value);
+    else if (section == "POS_VEL" && key == "vel_kp") current.vel_kp = std::stof(value);
+    else if (section == "POS_VEL" && key == "vel_ki") current.vel_ki = std::stof(value);
+    else if (section == "POS_VEL" && key == "pos_kp") current.pos_kp = std::stof(value);
+    else if (section == "POS_VEL" && key == "pos_ki") current.pos_ki = std::stof(value);
+    else if (section == "POS_VEL" && key == "vlim") current.vlim = std::stof(value);
+    else if (key == "motor_id") current.motor_id = parse_yaml_id(value);
+    else if (key == "feedback_id") current.feedback_id = parse_yaml_id(value);
+    else if (key == "model") current.model = value;
+    else if (key == "vendor") current.vendor = value;
+  }
+  append_joint_spec(current, joints);
+  if (!joints.empty()) cfg.joints = joints;
+  return cfg;
+}
+
+inline ExampleConfig& active_config() {
+  static ExampleConfig cfg;
+  return cfg;
+}
+
+inline const std::vector<JointSpec>& active_joints() {
+  return active_config().joints;
+}
+
 inline std::string parse_port(int argc, char** argv) {
+  active_config() = load_example_config(argc, argv);
   const std::string short_port = arg_value(argc, argv, "-p");
   if (!short_port.empty()) return short_port;
-  return arg_value(argc, argv, "--port", kDefaultPort);
+  return arg_value(argc, argv, "--port", active_config().channel);
 }
 
 inline double arg_double(int argc, char** argv, const std::string& name, double default_value) {
@@ -169,8 +360,11 @@ inline std::optional<std::string> prompt(const std::string& text) {
 }
 
 inline std::string urdf_arg(int argc, char** argv) {
+  active_config() = load_example_config(argc, argv);
   const std::string explicit_urdf = arg_value(argc, argv, "--urdf");
-  return explicit_urdf.empty() ? default_urdf_path() : explicit_urdf;
+  if (!explicit_urdf.empty()) return explicit_urdf;
+  if (!active_config().urdf_path.empty()) return active_config().urdf_path;
+  return default_urdf_path();
 }
 
 inline std::vector<double> parse_numbers(const std::string& line) {
@@ -196,7 +390,7 @@ inline int parse_joint(const std::string& value) {
     const int one_based = std::stoi(value.substr(5));
     if (1 <= one_based && one_based <= kAllDof) return one_based - 1;
   }
-  const auto& joints = b601_joints();
+  const auto& joints = active_joints();
   for (int i = 0; i < static_cast<int>(joints.size()); ++i) {
     if (value == joints[i].name) return i;
   }
@@ -268,19 +462,19 @@ inline void print_pose(const rebotarm::RobotModel& model, const Eigen::VectorXd&
 
 inline std::vector<float> default_kp() {
   std::vector<float> out;
-  for (const auto& joint : b601_joints()) out.push_back(joint.mit_kp);
+  for (const auto& joint : active_joints()) out.push_back(joint.mit_kp);
   return out;
 }
 
 inline std::vector<float> default_kd() {
   std::vector<float> out;
-  for (const auto& joint : b601_joints()) out.push_back(joint.mit_kd);
+  for (const auto& joint : active_joints()) out.push_back(joint.mit_kd);
   return out;
 }
 
 inline std::vector<float> default_vlim() {
   std::vector<float> out;
-  for (const auto& joint : b601_joints()) out.push_back(joint.vlim);
+  for (const auto& joint : active_joints()) out.push_back(joint.vlim);
   return out;
 }
 
@@ -308,6 +502,7 @@ struct B601Arm {
   std::string port;
   std::unique_ptr<motorbridge::Controller> controller;
   std::vector<motorbridge::Motor> motors;
+  std::vector<JointSpec> joints;
 
   B601Arm() = default;
   B601Arm(B601Arm&&) noexcept = default;
@@ -319,10 +514,33 @@ struct B601Arm {
     B601Arm arm;
     arm.port = port;
     arm.controller = open_controller(port);
-    arm.motors.reserve(b601_joints().size());
-    for (const auto& joint : b601_joints()) {
-      arm.motors.emplace_back(
-          arm.controller->add_damiao_motor(joint.motor_id, joint.feedback_id, joint.model));
+    arm.joints = active_joints();
+    arm.motors.reserve(arm.joints.size());
+    if (!arm.joints.empty()) {
+      const std::string vendor = arm.joints.front().vendor;
+      for (const auto& joint : arm.joints) {
+        if (vendor != joint.vendor) {
+          throw std::runtime_error("C++ examples currently expect one vendor per config");
+        }
+      }
+    }
+    for (const auto& joint : arm.joints) {
+      const std::string vendor = joint.vendor;
+      if (vendor == "damiao") {
+        arm.motors.emplace_back(
+            arm.controller->add_damiao_motor(joint.motor_id, joint.feedback_id, joint.model));
+      } else if (vendor == "robstride") {
+        arm.motors.emplace_back(
+            arm.controller->add_robstride_motor(joint.motor_id, joint.feedback_id, joint.model));
+      } else {
+        throw std::runtime_error("unsupported example vendor: " + vendor);
+      }
+    }
+    for (auto& motor : arm.motors) {
+      try {
+        motor.robstride_set_active_report(true);
+      } catch (...) {
+      }
     }
     return arm;
   }
@@ -363,7 +581,7 @@ struct B601Arm {
       try {
         motors[i].ensure_mode(mode, timeout_ms);
       } catch (const std::exception& e) {
-        std::cerr << "warning: " << b601_joints()[i].name << " mode switch failed: "
+        std::cerr << "warning: " << joints[i].name << " mode switch failed: "
                   << e.what() << "\n";
       }
     }
@@ -374,7 +592,7 @@ struct B601Arm {
       try {
         motors[i].ensure_mode(mode, timeout_ms);
       } catch (const std::exception& e) {
-        std::cerr << "warning: " << b601_joints()[i].name << " mode switch failed: "
+        std::cerr << "warning: " << joints[i].name << " mode switch failed: "
                   << e.what() << "\n";
       }
     }
@@ -422,8 +640,8 @@ struct B601Arm {
 
   void print_state() {
     const auto all_states = states();
-    for (int i = 0; i < static_cast<int>(b601_joints().size()); ++i) {
-      std::cout << std::left << std::setw(14) << b601_joints()[i].name;
+    for (int i = 0; i < static_cast<int>(joints.size()); ++i) {
+      std::cout << std::left << std::setw(14) << joints[i].name;
       if (i < static_cast<int>(all_states.size()) && all_states[i]) {
         const auto& s = *all_states[i];
         std::cout << " pos=" << std::right << std::setw(8) << std::fixed
@@ -442,8 +660,8 @@ struct B601Arm {
                     const std::vector<float>& tau) {
     for (int i = 0; i < static_cast<int>(motors.size()); ++i) {
       motors[i].send_mit(pos.size() > i ? pos[i] : 0.0f, vel.size() > i ? vel[i] : 0.0f,
-                         kp.size() > i ? kp[i] : b601_joints()[i].mit_kp,
-                         kd.size() > i ? kd[i] : b601_joints()[i].mit_kd,
+                         kp.size() > i ? kp[i] : joints[i].mit_kp,
+                         kd.size() > i ? kd[i] : joints[i].mit_kd,
                          tau.size() > i ? tau[i] : 0.0f);
     }
   }
@@ -451,7 +669,7 @@ struct B601Arm {
   void send_pos_vel_all(const std::vector<float>& pos, const std::vector<float>& vlim) {
     for (int i = 0; i < static_cast<int>(motors.size()); ++i) {
       motors[i].send_pos_vel(pos.size() > i ? pos[i] : 0.0f,
-                             vlim.size() > i ? vlim[i] : b601_joints()[i].vlim);
+                             vlim.size() > i ? vlim[i] : joints[i].vlim);
     }
   }
 };
@@ -565,6 +783,13 @@ inline std::string scale_end_link_inertial(const std::string& xml, double scale)
   return out;
 }
 
+inline bool has_end_link_inertial(const std::string& xml) {
+  size_t end_link_pos = xml.find("name=\"end_link\"");
+  if (end_link_pos == std::string::npos) end_link_pos = xml.find("name='end_link'");
+  if (end_link_pos == std::string::npos) return false;
+  return xml.find("<inertial", end_link_pos) != std::string::npos;
+}
+
 class TemporaryUrdf {
  public:
   explicit TemporaryUrdf(std::string path) : path_(std::move(path)) {}
@@ -591,24 +816,30 @@ struct GravityUrdf {
 };
 
 inline GravityUrdf gravity_urdf_for_gripper(int argc, char** argv, bool use_gripper) {
+  active_config() = load_example_config(argc, argv);
   const std::string explicit_urdf = arg_value(argc, argv, "--urdf");
-  const std::string base_urdf = explicit_urdf.empty() ? default_urdf_path() : explicit_urdf;
+  const bool configured_urdf = !active_config().urdf_path.empty();
+  const std::string base_urdf = !explicit_urdf.empty()
+                                    ? explicit_urdf
+                                    : (configured_urdf ? active_config().urdf_path
+                                                       : default_urdf_path());
   const std::string explicit_scale = arg_value(argc, argv, "--end-link-load-scale");
   const double scale = !explicit_scale.empty()
                            ? std::stod(explicit_scale)
                            : (!use_gripper ? 0.0
-                                           : (explicit_urdf.empty()
-                                                  ? kEndLinkLoadScaleWithGripper
-                                                  : 1.0));
-  if (std::abs(scale - 1.0) <= std::numeric_limits<double>::epsilon()) {
-    return GravityUrdf{base_urdf, nullptr, scale};
-  }
-
+                                           : (!explicit_urdf.empty() || configured_urdf
+                                                  ? 1.0
+                                                  : kEndLinkLoadScaleWithGripper));
   std::ifstream input(base_urdf);
   if (!input) throw std::runtime_error("failed to open URDF: " + base_urdf);
   std::ostringstream buffer;
   buffer << input.rdbuf();
-  const std::string modified = scale_end_link_inertial(buffer.str(), scale);
+  const std::string xml = buffer.str();
+  if (std::abs(scale - 1.0) <= std::numeric_limits<double>::epsilon() ||
+      !has_end_link_inertial(xml)) {
+    return GravityUrdf{base_urdf, nullptr, scale};
+  }
+  const std::string modified = scale_end_link_inertial(xml, scale);
   const auto now = std::chrono::steady_clock::now().time_since_epoch().count();
   const std::string temp_path = (std::filesystem::temp_directory_path() /
                                  ("rebotarm_control_rt_end_link_" + std::to_string(now) + ".urdf"))
@@ -627,9 +858,13 @@ inline int run_single_motor_console(int argc, char** argv) {
 
   const std::string joint_arg = arg_value(argc, argv, "--joint",
                                           arg_value(argc, argv, "-j", "0"));
+  active_config() = load_example_config(argc, argv);
   const int joint_idx = parse_joint(joint_arg);
   auto arm = B601Arm::open(parse_port(argc, argv));
-  const auto& joint = b601_joints()[joint_idx];
+  if (joint_idx < 0 || joint_idx >= static_cast<int>(arm.joints.size())) {
+    throw std::runtime_error("joint index out of range");
+  }
+  const auto& joint = arm.joints[joint_idx];
 
   std::cout << "connected: B601 on " << arm.port << "\n";
   std::cout << "joint: " << joint_idx << " (" << joint.name << ")\n";

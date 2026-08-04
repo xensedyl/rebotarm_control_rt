@@ -36,11 +36,22 @@ sudo chmod 666 /dev/ttyACM*
 
 If you want the packaged YAML defaults to work without `--port`, update `python/rebotarm_control_rt/config/arm.yaml` and `gripper.yaml` manually: `channel: /dev/ttyACM0`.
 
-For SocketCAN:
+For LingZu / RobStride through PCAN-USB, bring up SocketCAN at 1 Mbps and use the
+RobStride YAML configs:
 
 ```bash
-sudo ip link set can0 up type can bitrate 500000
+sudo modprobe peak_usb
+ip -br link
+
+sudo ip link set can0 down 2>/dev/null || true
+sudo ip link set can0 type can bitrate 1000000 restart-ms 100
+sudo ip link set can0 up
 ```
+
+For LingZu arm hardware examples, pass `--config python/rebotarm_control_rt/config/arm_rs.yaml --port can0`. For the
+LingZu gripper example, pass `--config python/rebotarm_control_rt/config/gripper_rs.yaml --port can0`. Kinematics and
+simulation examples do not need `--port`, but should still use `--config python/rebotarm_control_rt/config/arm_rs.yaml`
+when you want the LingZu URDF and `gripper_end` end-effector frame.
 
 ## Debug Tools
 
@@ -68,6 +79,47 @@ Interactive commands:
 | `state` | Print selected joint position, velocity, and torque |
 | `q` | Stop and disconnect |
 
+### 1b. LingZu (RobStride) Single Motor Console
+
+`0x03robstride_test.py` is the LingZu (RobStride) counterpart of the single-joint terminal. It
+loads the packaged `arm_rs.yaml` (LingZu motors over CAN) by default, enables active status
+reporting for continuous feedback, and adds RobStride low-level commands on top of the usual
+MIT / POS_VEL / VEL control.
+
+```bash
+python example/python/0x03robstride_test.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0 --joint joint1
+```
+
+Recommended first motion test:
+
+```text
+ping
+enable
+state
+mode posvel
+posvel 3 0.3
+state
+posvel 0 0.3
+disable
+q
+```
+
+Additional interactive commands compared to the Damiao console:
+
+| Command | Description |
+|---|---|
+| `ping` | Ping the selected motor (type-0 GET_DEVICE_ID) |
+| `clear_error` | Clear the motor fault state |
+| `csp <pos_deg> [vlim]` | Native RobStride CSP position mode (run_mode=5) for the selected joint |
+| `report <on\|off>` | Toggle active status reporting |
+| `read_param <id> [type]` | Read a parameter from the 0x7000 table, e.g. `read_param 0x7019` |
+| `write_param <id> <value> [type]` | Write a parameter, e.g. `write_param 0x701E 13.0` |
+| `save_params` | Persist parameters across power cycles (type-22) |
+
+In POS_VEL mode the loop gains from the YAML are written to the RobStride parameter table
+(`0x7017 limit_spd`, `0x701F spd_kp`, `0x7020 spd_ki`, `0x701E loc_kp`) before switching
+`run_mode`; LingZu motors have no separate position-loop Ki, so `pos_ki` is ignored.
+
 ### 2. Zero Calibration and State Monitor
 
 `2_zero_and_read.py` prints live joint positions. If `--skip-zero` is omitted, it asks for
@@ -76,6 +128,9 @@ confirmation and then sets the current arm pose as zero.
 ```bash
 python example/python/2_zero_and_read.py --port /dev/ttyACM0 --skip-zero
 python example/python/2_zero_and_read.py --port /dev/ttyACM0
+
+# LingZu / RobStride
+python example/python/2_zero_and_read.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0 --skip-zero
 ```
 
 ### 3. Damiao POS_VEL Gain Register Reader
@@ -122,6 +177,9 @@ python example/python/0x02_read_damiao_pd.py --config python/rebotarm_control_rt
 
 ```bash
 python example/python/3_mit_control.py --port /dev/ttyACM0 --rate 150
+
+# LingZu / RobStride
+python example/python/3_mit_control.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0 --rate 150
 ```
 
 Input format:
@@ -139,6 +197,9 @@ overrides `vlim` for all joints in that command.
 
 ```bash
 python example/python/4_pos_vel_control.py --port /dev/ttyACM0 --rate 150
+
+# LingZu / RobStride
+python example/python/4_pos_vel_control.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0 --rate 150
 ```
 
 Input format:
@@ -158,6 +219,9 @@ hardware.
 
 ```bash
 python example/python/5_fk_test.py
+
+# LingZu URDF / gripper_end frame
+python example/python/5_fk_test.py --config python/rebotarm_control_rt/config/arm_rs.yaml
 ```
 
 Example input:
@@ -180,6 +244,9 @@ hardware.
 
 ```bash
 python example/python/6_ik_test.py
+
+# LingZu URDF / gripper_end frame
+python example/python/6_ik_test.py --config python/rebotarm_control_rt/config/arm_rs.yaml
 ```
 
 Input format:
@@ -205,6 +272,9 @@ joint targets.
 
 ```bash
 python example/python/7_arm_ik_control.py --port /dev/ttyACM0
+
+# LingZu / RobStride
+python example/python/7_arm_ik_control.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0
 ```
 
 Example input:
@@ -230,6 +300,9 @@ trajectory, then the Rust RT loop executes the streamed joint targets.
 
 ```bash
 python example/python/8_arm_traj_control.py --port /dev/ttyACM0
+
+# LingZu / RobStride
+python example/python/8_arm_traj_control.py --config python/rebotarm_control_rt/config/arm_rs.yaml --port can0
 ```
 
 Input format:
@@ -256,6 +329,13 @@ sends MIT commands from a Python callback loop.
 
 ```bash
 python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200
+
+# LingZu / RobStride
+python example/python/9_gravity_compensation.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --rate 200 \
+  --use_gripper=false
 ```
 
 Control law:
@@ -272,6 +352,13 @@ without the gripper or equivalent end load, disable it explicitly:
 
 ```bash
 python example/python/9_gravity_compensation.py --port /dev/ttyACM0 --rate 200 --use_gripper=false
+
+# LingZu / RobStride arm-only model
+python example/python/9_gravity_compensation.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --rate 200 \
+  --use_gripper=false
 ```
 
 Press `Ctrl+C` to stop and disconnect.
@@ -284,6 +371,13 @@ pushing the arm fast enough updates the locked pose.
 
 ```bash
 python example/python/10_gravity_compensation_lock.py --port /dev/ttyACM0 --rate 200
+
+# LingZu / RobStride
+python example/python/10_gravity_compensation_lock.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --rate 200 \
+  --use_gripper=false
 ```
 
 Important options:
@@ -303,6 +397,9 @@ MIT/POS_VEL/VEL commands.
 
 ```bash
 python example/python/gripper_test.py --port /dev/ttyACM0
+
+# LingZu / RobStride gripper
+python example/python/gripper_test.py --config python/rebotarm_control_rt/config/gripper_rs.yaml --port can0
 ```
 
 Interactive commands:
@@ -325,6 +422,15 @@ orientation.
 ```bash
 python example/python/tool_calibration.py \
   --port /dev/ttyACM0 \
+  --samples 4 \
+  --kd 2.0 \
+  --gravity-scale 1.0
+
+# LingZu / RobStride, updates fixed joint j_gripper_end by default
+python example/python/tool_calibration.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --frame link6 \
   --samples 4 \
   --kd 2.0 \
   --gravity-scale 1.0
@@ -395,12 +501,28 @@ much as possible. The first stage records the arm without extra end load; the se
 new gripper and identifies only the fixed `end_link` payload. This is the preferred workflow for
 improving gravity-compensation feel.
 
+For LingZu / RobStride, add `--config python/rebotarm_control_rt/config/arm_rs.yaml --port can0` to the recording and replay commands.
+The LingZu URDF uses `gripper_end`/`j_gripper_end` instead of the B601 `end_link` payload convention,
+so keep the arm-only workflow first and choose the payload link explicitly only if you have added a
+tool payload inertial to that URDF.
+
 #### A1. Record the arm-only trajectory
 
 ```bash
 python example/python/11_record_gravity_trajectory.py \
   --output calibration/arm_only_trajectory.csv \
   --port /dev/ttyACM0 \
+  --rate 200 \
+  --sample-rate 100 \
+  --kd 1.0 \
+  --gravity-scale 1.0 \
+  --use_gripper=false
+
+# LingZu / RobStride
+python example/python/11_record_gravity_trajectory.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --output calibration/lingzu_arm_only_trajectory.csv \
+  --port can0 \
   --rate 200 \
   --sample-rate 100 \
   --kd 1.0 \
@@ -415,6 +537,13 @@ python example/python/12_collect_identification_data.py \
   --trajectory calibration/arm_only_trajectory.csv \
   --output calibration/id_data_arm_only.csv \
   --port /dev/ttyACM0
+
+# LingZu / RobStride preview
+python example/python/12_collect_identification_data.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --trajectory calibration/lingzu_arm_only_trajectory.csv \
+  --output calibration/id_data_lingzu_arm_only.csv \
+  --port can0
 ```
 
 #### A3. Replay and collect arm-only data
@@ -424,6 +553,14 @@ python example/python/12_collect_identification_data.py \
   --trajectory calibration/arm_only_trajectory.csv \
   --output calibration/id_data_arm_only.csv \
   --port /dev/ttyACM0 \
+  --execute
+
+# LingZu / RobStride replay
+python example/python/12_collect_identification_data.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --trajectory calibration/lingzu_arm_only_trajectory.csv \
+  --output calibration/id_data_lingzu_arm_only.csv \
+  --port can0 \
   --execute
 ```
 
@@ -436,6 +573,14 @@ python example/python/13_identify_dynamics.py \
   --ignore-payload-link end_link \
   --output calibration/identified_arm.yaml \
   --urdf-output calibration/identified_arm.urdf
+
+# LingZu / RobStride arm body
+python example/python/13_identify_dynamics.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --data calibration/id_data_lingzu_arm_only.csv \
+  --mode full \
+  --output calibration/identified_lingzu_arm.yaml \
+  --urdf-output calibration/identified_lingzu_arm.urdf
 ```
 
 `--ignore-payload-link end_link` removes the fixed `end_link` inertial from a temporary URDF during
@@ -499,6 +644,14 @@ python example/python/9_gravity_compensation.py \
   --rate 200 \
   --kd 1.0 \
   --urdf calibration/identified_arm_with_gripper.urdf
+
+# LingZu / RobStride identified arm
+python example/python/9_gravity_compensation.py \
+  --config python/rebotarm_control_rt/config/arm_rs.yaml \
+  --port can0 \
+  --rate 200 \
+  --kd 1.0 \
+  --urdf calibration/identified_lingzu_arm.urdf
 ```
 
 ### Workflow B: identify arm and gripper together
@@ -601,4 +754,9 @@ examples:
 env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/fk_sim.py
 env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/ik_sim.py
 env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/traj_sim.py
+
+# LingZu URDF
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/fk_sim.py --config python/rebotarm_control_rt/config/arm_rs.yaml
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/ik_sim.py --config python/rebotarm_control_rt/config/arm_rs.yaml
+env -u PYTHONPATH -u LD_LIBRARY_PATH python example/python/sim/traj_sim.py --config python/rebotarm_control_rt/config/arm_rs.yaml
 ```

@@ -6,6 +6,7 @@
 #include <pinocchio/algorithm/kinematics.hpp>
 #include <pinocchio/algorithm/frames.hpp>
 #include <pinocchio/algorithm/jacobian.hpp>
+#include <pinocchio/algorithm/model.hpp>
 #include <pinocchio/spatial/explog.hpp>
 
 #include <cmath>
@@ -14,8 +15,35 @@
 
 namespace rebotarm {
 
+namespace {
+
+bool has_frame(const pinocchio::Model& model, const std::string& name) {
+  for (const auto& frame : model.frames) {
+    if (frame.name == name) return true;
+  }
+  return false;
+}
+
+void reduce_to_arm_dof_if_needed(pinocchio::Model& model) {
+  if (model.nq <= 6 || !has_frame(model, "gripper_end")) return;
+
+  std::vector<pinocchio::JointIndex> joints_to_lock;
+  int movable_seen = 0;
+  for (pinocchio::JointIndex joint_id = 1; joint_id < model.joints.size(); ++joint_id) {
+    if (model.joints[joint_id].idx_q() < 0) continue;
+    ++movable_seen;
+    if (movable_seen > 6) joints_to_lock.push_back(joint_id);
+  }
+  if (joints_to_lock.empty()) return;
+
+  model = pinocchio::buildReducedModel(model, joints_to_lock, pinocchio::neutral(model));
+}
+
+}  // namespace
+
 RobotModel::RobotModel(const std::string& urdf_path) : urdf_path_(urdf_path) {
   pinocchio::urdf::buildModel(urdf_path, model_);
+  reduce_to_arm_dof_if_needed(model_);
   data_ = pinocchio::Data(model_);
 }
 
@@ -54,8 +82,17 @@ int RobotModel::frame_id(const std::string& name) const {
   return static_cast<int>(model_.getFrameId(name));
 }
 
+std::string RobotModel::default_end_effector_frame_name() const {
+  for (const char* name : {"end_link", "gripper_end"}) {
+    for (const auto& frame : model_.frames) {
+      if (frame.name == name) return name;
+    }
+  }
+  throw std::runtime_error("RobotModel has no default end-effector frame (expected end_link or gripper_end)");
+}
+
 int RobotModel::end_effector_frame_id() const {
-  return static_cast<int>(model_.getFrameId("end_link"));
+  return static_cast<int>(model_.getFrameId(default_end_effector_frame_name()));
 }
 
 Eigen::VectorXd RobotModel::neutral() const { return pinocchio::neutral(model_); }
@@ -94,7 +131,7 @@ RobotModel::fk(const Eigen::VectorXd& q, const std::string& frame_name) const {
     throw std::invalid_argument("q 维度必须为 nq");
   pinocchio::forwardKinematics(model_, data_, q);
   pinocchio::updateFramePlacements(model_, data_);
-  const auto fid = frame_name.empty() ? model_.getFrameId("end_link")
+  const auto fid = frame_name.empty() ? model_.getFrameId(default_end_effector_frame_name())
                                       : model_.getFrameId(frame_name);
   const pinocchio::SE3& oMf = data_.oMf[fid];
   return {oMf.translation(), oMf.rotation(), oMf.toHomogeneousMatrix()};

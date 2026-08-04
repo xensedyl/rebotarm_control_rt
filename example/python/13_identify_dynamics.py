@@ -21,12 +21,14 @@ from rebotarm_control_rt.identification import (
     write_urdf_without_link_inertial,
 )
 from rebotarm_control_rt.paths import resolve_urdf_path
+from _example_config import model_urdf_for_config
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", required=True, help="CSV with time,q1..q6,dq1..dq6,ddq1..ddq6,tau1..tau6.")
-    parser.add_argument("--urdf", default=None, help="Input URDF. Defaults to the SDK URDF.")
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--urdf", default=None, help="Input URDF. Defaults to the config URDF or SDK URDF.")
     parser.add_argument(
         "--mode",
         choices=["full", "base", "payload"],
@@ -76,7 +78,7 @@ def main() -> None:
     args = parser.parse_args()
 
     dataset = load_identification_csv(args.data)
-    input_urdf = resolve_urdf_path(args.urdf)
+    input_urdf = resolve_urdf_path(model_urdf_for_config(args.config, args.urdf))
     model_urdf = input_urdf
     temp_urdf_to_remove: Path | None = None
 

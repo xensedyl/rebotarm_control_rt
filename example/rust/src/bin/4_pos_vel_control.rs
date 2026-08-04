@@ -1,7 +1,6 @@
-use motor_vendor_damiao::ControlMode;
 use rebotarm_control_rt_rust_examples::common::{
     default_vlim, has_flag, parse_floats, parse_port, parse_rate, prompt, sleep_to_rate, B601Arm,
-    ALL_DOF, B601_JOINTS, DEFAULT_RATE_HZ,
+    ControlMode, ALL_DOF, DEFAULT_RATE_HZ,
 };
 use std::env;
 use std::error::Error;
@@ -26,6 +25,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let vlim = Arc::new(Mutex::new(default_vlim()));
     let running = Arc::new(AtomicBool::new(true));
     let motors = arm.motors.clone();
+    let joints = arm.joints.clone();
     let target_rt = Arc::clone(&target);
     let vlim_rt = Arc::clone(&vlim);
     let running_rt = Arc::clone(&running);
@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn Error>> {
             for idx in 0..motors.len() {
                 let _ = motors[idx].send_cmd_pos_vel(
                     target.get(idx).copied().unwrap_or(0.0),
-                    vlim.get(idx).copied().unwrap_or(B601_JOINTS[idx].vlim),
+                    vlim.get(idx).copied().unwrap_or(joints[idx].vlim),
                 );
             }
             sleep_to_rate(tick, rate);

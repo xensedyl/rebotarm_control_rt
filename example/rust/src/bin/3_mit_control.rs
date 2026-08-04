@@ -1,7 +1,6 @@
-use motor_vendor_damiao::ControlMode;
 use rebotarm_control_rt_rust_examples::common::{
     default_kd, default_kp, has_flag, parse_floats, parse_port, parse_rate, prompt, sleep_to_rate,
-    B601Arm, ALL_DOF, B601_JOINTS, DEFAULT_RATE_HZ,
+    B601Arm, ControlMode, ALL_DOF, DEFAULT_RATE_HZ,
 };
 use std::env;
 use std::error::Error;
@@ -27,6 +26,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let kd = Arc::new(Mutex::new(default_kd()));
     let running = Arc::new(AtomicBool::new(true));
     let motors = arm.motors.clone();
+    let joints = arm.joints.clone();
     let target_rt = Arc::clone(&target);
     let kp_rt = Arc::clone(&kp);
     let kd_rt = Arc::clone(&kd);
@@ -42,8 +42,8 @@ fn main() -> Result<(), Box<dyn Error>> {
                 let _ = motors[idx].send_cmd_mit(
                     target.get(idx).copied().unwrap_or(0.0),
                     0.0,
-                    kp.get(idx).copied().unwrap_or(B601_JOINTS[idx].mit_kp),
-                    kd.get(idx).copied().unwrap_or(B601_JOINTS[idx].mit_kd),
+                    kp.get(idx).copied().unwrap_or(joints[idx].mit_kp),
+                    kd.get(idx).copied().unwrap_or(joints[idx].mit_kd),
                     0.0,
                 );
             }

@@ -6,6 +6,7 @@ This example does not connect to hardware.
 """
 from __future__ import annotations
 
+import argparse
 import math
 import sys
 from pathlib import Path
@@ -17,6 +18,7 @@ if SOURCE_PYTHON.exists() and str(SOURCE_PYTHON) not in sys.path:
     sys.path.insert(0, str(SOURCE_PYTHON))
 
 from rebotarm_control_rt.kinematics import compute_fk, get_joint_names, load_robot_model
+from _example_config import model_urdf_for_config
 
 
 def matrix_to_rpy_xyz(rot: np.ndarray) -> np.ndarray:
@@ -41,7 +43,12 @@ def parse_joint_degrees(line: str, n: int) -> np.ndarray:
 
 
 def main() -> None:
-    model = load_robot_model()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--urdf", default=None, help="URDF path. Defaults to the config URDF or SDK URDF.")
+    args = parser.parse_args()
+
+    model = load_robot_model(model_urdf_for_config(args.config, args.urdf))
     joint_names = get_joint_names(model)
 
     print("=" * 56)

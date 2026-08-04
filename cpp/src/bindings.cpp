@@ -149,7 +149,7 @@ PYBIND11_MODULE(_math, m) {
   // q_init 必填但可为 None；target_pos 必填，故二者均不给默认值。
   m.def("compute_ik", &compute_ik, py::arg("model"), py::arg("q_init"), py::arg("target_pos"),
         py::arg("target_rot") = std::nullopt, py::arg("roll") = 0.0, py::arg("pitch") = 0.0,
-        py::arg("yaw") = 0.0, py::arg("frame_name") = "end_link", py::arg("params") = IKParams());
+        py::arg("yaw") = 0.0, py::arg("frame_name") = "", py::arg("params") = IKParams());
 
   // ── 动力学（镜像 dynamics/*.py，第一参为 RobotModel） ──────────────────────
   namespace d = rebotarm::dyn;

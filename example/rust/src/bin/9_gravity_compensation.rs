@@ -1,7 +1,6 @@
-use motor_vendor_damiao::ControlMode;
 use rebotarm_control_rt_rust_examples::common::{
     gravity_urdf_for_gripper, has_flag, install_signal_handler, parse_bool_arg, parse_float_arg,
-    parse_port, parse_rate, sleep_to_rate, stop_requested, B601Arm, MathModel, DEFAULT_RATE_HZ,
+    parse_port, parse_rate, sleep_to_rate, stop_requested, B601Arm, ControlMode, MathModel, DEFAULT_RATE_HZ,
 };
 use std::env;
 use std::error::Error;

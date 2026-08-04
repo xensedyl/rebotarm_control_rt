@@ -2,6 +2,7 @@
 """Inverse-kinematics MeshCat simulation."""
 from __future__ import annotations
 
+import argparse
 import math
 import sys
 from pathlib import Path
@@ -15,6 +16,7 @@ for path in (REPO_ROOT, EXAMPLE_PYTHON_ROOT):
         sys.path.insert(0, str(path))
 
 from rebotarm_control_rt.kinematics import IKParams, compute_fk, pos_rot_to_se3
+from _example_config import model_urdf_for_config
 from sim.visualizer import Visualizer
 
 def rpy_xyz_to_matrix(rpy_rad: np.ndarray) -> np.ndarray:
@@ -29,8 +31,13 @@ def rpy_xyz_to_matrix(rpy_rad: np.ndarray) -> np.ndarray:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", "-c", default=None, help="Path to arm YAML config.")
+    parser.add_argument("--urdf", default=None, help="URDF path. Defaults to the config URDF or SDK URDF.")
+    args = parser.parse_args()
+
     print("loading visualizer...")
-    viz = Visualizer()
+    viz = Visualizer(urdf_path=model_urdf_for_config(args.config, args.urdf))
     viz.neutral()
     model = viz.model
     frame_id = model.end_effector_frame_id()

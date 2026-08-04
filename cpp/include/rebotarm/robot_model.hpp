@@ -70,6 +70,7 @@ private:
   mutable pinocchio::Data data_;
 
   Eigen::VectorXd clamp_config(const Eigen::VectorXd& q) const;
+  std::string default_end_effector_frame_name() const;
   std::pair<double, Eigen::Matrix<double, 6, 1>>
   compute_error(const Eigen::VectorXd& q, const pinocchio::SE3& target, int end_frame_id) const;
 };

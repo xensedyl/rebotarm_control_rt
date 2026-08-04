@@ -3,7 +3,7 @@
 Python 仅注入默认 URDF 路径后转交 C++ 实现。
 """
 from rebotarm_control_rt._math import ArmEndPos as _ArmEndPos, TrajProfile
-from rebotarm_control_rt.paths import default_urdf_path
+from rebotarm_control_rt.paths import default_urdf_path, resolve_urdf_path
 
 _URDF = str(default_urdf_path())
 
@@ -18,8 +18,9 @@ class ArmEndPos(_ArmEndPos):
             ep.move_to_traj(x=0.3, y=0.0, z=0.3, pitch=0.4, duration=2.0)
     """
 
-    def __init__(self, arm, dt: float = 0.02, profile=TrajProfile.MIN_JERK) -> None:
-        super().__init__(arm, _URDF, dt, profile)
+    def __init__(self, arm, dt: float = 0.02, profile=TrajProfile.MIN_JERK, *, urdf_path: str | None = None) -> None:
+        path = urdf_path if urdf_path is not None else getattr(arm, "urdf_path", None)
+        super().__init__(arm, str(resolve_urdf_path(path)), dt, profile)
 
 
 __all__ = ["ArmEndPos"]
