@@ -23,7 +23,7 @@ pub const DEFAULT_PORT: &str = "/dev/ttyACM0";
 pub const DEFAULT_CONFIG_REL: &str = "python/rebotarm_control_rt/config/arm.yaml";
 pub const DEFAULT_RATE_HZ: f64 = 150.0;
 pub const DEFAULT_URDF_REL: &str =
-    "urdf/reBot-DevArm_fixend_description/urdf/reBot-DevArm_fixend.urdf";
+    "python/rebotarm_control_rt/urdf/reBot-DevArm_fixend_description/urdf/reBot-DevArm_fixend.urdf";
 pub const END_LINK_LOAD_SCALE_WITH_GRIPPER: f64 = 0.7;
 
 pub const ARM_LIMITS_RAD: [(f64, f64); ARM_DOF] = [

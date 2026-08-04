@@ -33,8 +33,8 @@ rebotarm_control_rt/
 │   ├── dynamics/
 │   ├── trajectory/
 │   ├── controllers/
-│   └── config/                           #   随包安装
-├── urdf/                                 # 项目级机器人描述资源
+│   ├── config/                           #   随包安装
+│   └── urdf/                             #   随包安装的 DevArm + RobStride 资源
 ├── calibration/                          # 本地生成的标定结果
 ├── example/
 │   ├── python/                          # Python 示例和 MeshCat 仿真
@@ -85,6 +85,10 @@ native module 是否都能导入：
 conda activate rebot
 python -c "import rebotarm_control_rt._math, rebotarm_control_rt._native; print('ok')"
 ```
+
+DevArm 与 RobStride 的 URDF/mesh 都会安装在 Python 包内。请从
+`rebotarm_control_rt.paths` 使用 `default_urdf_path()` 或
+`robstride_urdf_path()`，不要自行拼接仓库相对路径。
 
 ### 实时性说明
 

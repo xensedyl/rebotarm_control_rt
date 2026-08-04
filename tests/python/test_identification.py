@@ -94,7 +94,9 @@ def test_apply_dynamic_parameters_to_urdf(tmp_path: Path):
 def test_payload_identification_recovers_end_link_mass_and_com(tmp_path: Path):
     urdf_in = Path("calibration/tool_calibration.urdf")
     if not urdf_in.exists():
-        urdf_in = Path("urdf/reBot-DevArm_fixend_description/urdf/reBot-DevArm_fixend.urdf")
+        from rebotarm_control_rt.paths import default_urdf_path
+
+        urdf_in = default_urdf_path()
     arm_only = write_urdf_without_link_inertial(urdf_in, tmp_path / "arm_only.urdf", link_name="end_link")
     true_params = np.array([0.82, 0.82 * 0.03, 0.82 * -0.02, 0.82 * 0.11])
     full_urdf = apply_payload_parameters_to_urdf(arm_only, true_params, tmp_path / "payload.urdf", link_name="end_link")

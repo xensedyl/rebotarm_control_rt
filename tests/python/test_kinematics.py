@@ -4,12 +4,20 @@ FK 直接来自 Pinocchio C++（构造即正确）；IK 与 Python 版同算法�
 用自洽往返（对随机 q 计算 FK 目标，再 IK 回解并验证 FK 一致）验证绑定正确性，
 无需依赖环境里（已损坏的）Python pinocchio 作参照。
 """
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 m = pytest.importorskip("rebotarm_control_rt._math")
 from rebotarm_control_rt.kinematics import _URDF
-from rebotarm_control_rt.paths import default_urdf_path, resolve_urdf_path
+from rebotarm_control_rt.paths import (
+    config_urdf_path,
+    default_urdf_path,
+    package_root,
+    resolve_urdf_path,
+    robstride_urdf_path,
+)
 
 
 def _urdf():
@@ -21,10 +29,30 @@ def _rm():
 
 
 def test_urdf_path_resolution_defaults_and_calibration_name():
+    assert default_urdf_path().is_file()
+    assert default_urdf_path().is_relative_to(
+        Path(__import__("rebotarm_control_rt").__file__).resolve().parent
+    )
     assert resolve_urdf_path() == default_urdf_path()
     resolved = resolve_urdf_path("tool_calibration.urdf")
     assert resolved.name == "tool_calibration.urdf"
     assert resolved.parent.name == "calibration"
+
+
+def test_packaged_robstride_urdf_path_and_legacy_relative_path():
+    packaged = robstride_urdf_path()
+    assert packaged.is_file()
+    assert packaged.name == "00-arm-rs_asm-v3.urdf"
+    assert packaged.is_relative_to(
+        Path(__import__("rebotarm_control_rt").__file__).resolve().parent
+    )
+    legacy = resolve_urdf_path(
+        "urdf/00-arm-rs_asm-v3/urdf/00-arm-rs_asm-v3.urdf"
+    )
+    assert legacy == packaged
+    assert config_urdf_path(package_root() / "config" / "arm_rs.yaml") == packaged
+    model = m.RobotModel(str(packaged))
+    assert model.nq == 6
 
 
 def test_fk_shapes_and_orthonormal():

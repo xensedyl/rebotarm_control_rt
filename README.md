@@ -34,8 +34,8 @@ rebotarm_control_rt/
 │   ├── dynamics/
 │   ├── trajectory/
 │   ├── controllers/
-│   └── config/                           #   installed with the package
-├── urdf/                                 # Project-level robot description assets
+│   ├── config/                           #   installed with the package
+│   └── urdf/                             #   packaged DevArm + RobStride assets
 ├── calibration/                          # Local generated calibration outputs
 ├── example/
 │   ├── python/                          # Python examples and MeshCat simulations
@@ -87,6 +87,10 @@ install and verify that both native modules can be imported:
 conda activate rebot
 python -c "import rebotarm_control_rt._math, rebotarm_control_rt._native; print('ok')"
 ```
+
+Both DevArm and RobStride URDF/mesh resources are installed inside the Python
+package. Use `default_urdf_path()` or `robstride_urdf_path()` from
+`rebotarm_control_rt.paths` instead of constructing repository-relative paths.
 
 ### Real-time note
 

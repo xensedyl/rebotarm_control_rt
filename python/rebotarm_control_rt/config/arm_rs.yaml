@@ -12,7 +12,7 @@
 #     灵足无独立位置环 Ki，pos_ki 字段被忽略。
 
 channel: can0
-urdf_path: "urdf/00-arm-rs_asm-v3/urdf/00-arm-rs_asm-v3.urdf"
+urdf_path: "../urdf/00-arm-rs_asm-v3/urdf/00-arm-rs_asm-v3.urdf"
 end_effector_frame: "gripper_end"
 
 # 控制循环频率 (Hz)
