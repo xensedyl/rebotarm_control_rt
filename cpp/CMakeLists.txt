@@ -9,27 +9,74 @@ if(NOT CMAKE_BUILD_TYPE)
 endif()
 
 # ---------------------------------------------------------------------------
-# 自动探测 Pinocchio C++ 前缀（conda-forge / 系统安装；不依赖 ROS）。
-# 优先级：-DPINOCCHIO_PREFIX > $PINOCCHIO_PREFIX > $CONDA_PREFIX > /usr/local > /usr
+# 自动探测 Pinocchio C++ 前缀（当前环境 / 项目私有 / 系统；不依赖 ROS）。
+# 优先级：-DPINOCCHIO_PREFIX > $PINOCCHIO_PREFIX > $CONDA_PREFIX > .deps > /usr/local > /usr
 # 仅链接 C++ 核心库，绕开 pinocchioConfig.cmake（其会拖入 eigenpy/Boost.Python）。
 # ---------------------------------------------------------------------------
+function(rebotarm_pinocchio_prefix_compatible prefix result_var)
+  set(is_compatible FALSE)
+  set(config_header "${prefix}/include/pinocchio/config.hpp")
+  if(EXISTS "${prefix}/include/pinocchio/spatial/se3-base.hpp" AND EXISTS "${config_header}")
+    file(STRINGS "${config_header}" version_line
+      REGEX "^[ \\t]*#[ \\t]*define[ \\t]+PINOCCHIO_VERSION[ \\t]+\"")
+    string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" candidate_version "${version_line}")
+    if(candidate_version
+       AND NOT candidate_version VERSION_LESS "3.2.0"
+       AND candidate_version VERSION_LESS "4.0.0")
+      set(is_compatible TRUE)
+    endif()
+  endif()
+  set(${result_var} ${is_compatible} PARENT_SCOPE)
+endfunction()
+
 if(NOT PINOCCHIO_PREFIX)
   if(DEFINED ENV{PINOCCHIO_PREFIX})
     set(PINOCCHIO_PREFIX "$ENV{PINOCCHIO_PREFIX}")
-  elseif(DEFINED ENV{CONDA_PREFIX} AND EXISTS "$ENV{CONDA_PREFIX}/include/pinocchio")
-    set(PINOCCHIO_PREFIX "$ENV{CONDA_PREFIX}")
-  elseif(EXISTS "/usr/local/include/pinocchio")
-    set(PINOCCHIO_PREFIX "/usr/local")
-  elseif(EXISTS "/usr/include/pinocchio")
-    set(PINOCCHIO_PREFIX "/usr")
   endif()
 endif()
+if(NOT PINOCCHIO_PREFIX AND DEFINED ENV{CONDA_PREFIX})
+  rebotarm_pinocchio_prefix_compatible("$ENV{CONDA_PREFIX}" conda_pinocchio_compatible)
+  if(conda_pinocchio_compatible)
+    set(PINOCCHIO_PREFIX "$ENV{CONDA_PREFIX}")
+  endif()
+endif()
+if(NOT PINOCCHIO_PREFIX)
+  set(private_pinocchio_prefix "${CMAKE_CURRENT_SOURCE_DIR}/../.deps/pinocchio")
+  rebotarm_pinocchio_prefix_compatible("${private_pinocchio_prefix}" private_pinocchio_compatible)
+  if(private_pinocchio_compatible)
+    set(PINOCCHIO_PREFIX "${private_pinocchio_prefix}")
+  endif()
+endif()
+foreach(system_pinocchio_prefix IN ITEMS /usr/local /usr)
+  if(NOT PINOCCHIO_PREFIX)
+    rebotarm_pinocchio_prefix_compatible(
+      "${system_pinocchio_prefix}" system_pinocchio_compatible)
+    if(system_pinocchio_compatible)
+      set(PINOCCHIO_PREFIX "${system_pinocchio_prefix}")
+    endif()
+  endif()
+endforeach()
 if(NOT PINOCCHIO_PREFIX OR NOT EXISTS "${PINOCCHIO_PREFIX}/include/pinocchio")
   message(FATAL_ERROR
-    "未找到 Pinocchio C++。请先 `conda install -c conda-forge pinocchio`，"
-    "或显式指定 -DPINOCCHIO_PREFIX=<prefix>。")
+    "未找到 Pinocchio C++。请运行 `bash setup_env.sh --prepare-pinocchio`，"
+    "或显式指定 -DPINOCCHIO_PREFIX=<prefix>。本项目不要求 ROS。")
+endif()
+set(PINOCCHIO_CONFIG_HEADER "${PINOCCHIO_PREFIX}/include/pinocchio/config.hpp")
+if(NOT EXISTS "${PINOCCHIO_CONFIG_HEADER}")
+  message(FATAL_ERROR "Pinocchio 前缀缺少 config.hpp：${PINOCCHIO_PREFIX}")
+endif()
+file(STRINGS "${PINOCCHIO_CONFIG_HEADER}" PINOCCHIO_VERSION_LINE
+  REGEX "^[ \\t]*#[ \\t]*define[ \\t]+PINOCCHIO_VERSION[ \\t]+\"")
+string(REGEX MATCH "[0-9]+\\.[0-9]+\\.[0-9]+" PINOCCHIO_DETECTED_VERSION
+  "${PINOCCHIO_VERSION_LINE}")
+if(NOT PINOCCHIO_DETECTED_VERSION
+   OR PINOCCHIO_DETECTED_VERSION VERSION_LESS "3.2.0"
+   OR NOT PINOCCHIO_DETECTED_VERSION VERSION_LESS "4.0.0")
+  message(FATAL_ERROR
+    "需要 Pinocchio >=3.2,<4，检测到 ${PINOCCHIO_DETECTED_VERSION}：${PINOCCHIO_PREFIX}")
 endif()
 message(STATUS "Pinocchio prefix: ${PINOCCHIO_PREFIX}")
+message(STATUS "Pinocchio version: ${PINOCCHIO_DETECTED_VERSION}")
 list(APPEND CMAKE_PREFIX_PATH "${PINOCCHIO_PREFIX}")
 
 # pybind11（经 -Dpybind11_DIR=$(python -m pybind11 --cmakedir)）。

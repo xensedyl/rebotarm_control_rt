@@ -15,7 +15,8 @@ license-files = ["LICENSE"]
 requires-python = ">=3.10"
 # 运行期仅需 numpy/pyyaml。运动学/动力学已下沉到 C++（链接 Pinocchio C++），
 # 不再依赖 Python 的 pinocchio/pin、meshcat、matplotlib。
-# 注：Pinocchio C++ 不是 pip 包，需 conda-forge 安装（见 INSTALL.md / setup_env.sh）。
+# 注：Pinocchio C++ 不是 pip 包；setup_env.sh 可自动准备项目私有前缀，
+# 不向当前 Python/ROS/RoboStack 环境注入 Pinocchio 或 Boost。
 dependencies = [
     "numpy>=1.24.0",
     "pyyaml>=6.0",

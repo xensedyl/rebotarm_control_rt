@@ -24,7 +24,7 @@ PY=/home/xense/miniforge3/envs/rebot/bin/python ./build.sh
 构建硬件示例需要的 `motor_abi`：
 
 ```bash
-cargo build --manifest-path ../motorbridge/motor_abi/Cargo.toml --release
+cargo build --manifest-path .deps/motorbridge/motor_abi/Cargo.toml --release
 ```
 
 再构建 C++ 示例：

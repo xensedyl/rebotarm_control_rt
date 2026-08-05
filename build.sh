@@ -14,7 +14,7 @@ echo "== Python: $(command -v "$PY") =="
 PYBIND11_DIR="$("$PY" -m pybind11 --cmakedir)"
 echo "== pybind11 cmakedir: $PYBIND11_DIR =="
 
-# Pinocchio C++ 前缀由 CMake 自动探测（conda-forge / 系统）；如需可显式：
+# Pinocchio C++ 前缀由 CMake 自动探测（显式 / 当前环境 / 项目私有 / 系统）；如需可显式：
 #   PINOCCHIO_PREFIX=/path/to/prefix ./build.sh
 PY_PREFIX="$("$PY" - <<'PYEOF'
 import sys
@@ -22,10 +22,22 @@ print(sys.prefix)
 PYEOF
 )"
 CMAKE_PINO_ARG=()
+PRIVATE_PINO_PREFIX="${REBOTARM_PINOCCHIO_PREFIX:-$HERE/.deps/pinocchio}"
+pino_prefix_compatible() {
+  local prefix=$1 version major minor
+  [[ -f "$prefix/include/pinocchio/config.hpp" ]] || return 1
+  version="$(sed -n 's/^[[:space:]]*#[[:space:]]*define[[:space:]]\+PINOCCHIO_VERSION[[:space:]]\+"\([^"]\+\)".*/\1/p' \
+    "$prefix/include/pinocchio/config.hpp" | head -n 1)"
+  IFS=. read -r major minor _ <<<"$version"
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ ]] || return 1
+  (( major == 3 && minor >= 2 ))
+}
 if [[ -n "${PINOCCHIO_PREFIX:-}" ]]; then
   CMAKE_PINO_ARG=(-DPINOCCHIO_PREFIX="$PINOCCHIO_PREFIX")
-elif [[ -d "$PY_PREFIX/include/pinocchio" ]]; then
+elif pino_prefix_compatible "$PY_PREFIX"; then
   CMAKE_PINO_ARG=(-DPINOCCHIO_PREFIX="$PY_PREFIX")
+elif pino_prefix_compatible "$PRIVATE_PINO_PREFIX"; then
+  CMAKE_PINO_ARG=(-DPINOCCHIO_PREFIX="$PRIVATE_PINO_PREFIX")
 fi
 
 # 清理上一次的 CMake 缓存：换 conda 环境后，find_library/find_package 的缓存会指向旧

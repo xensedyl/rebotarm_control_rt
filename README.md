@@ -7,7 +7,7 @@ natively; **Python is only a thin API layer** on top.
 
 | Layer | Language | What it does |
 |---|---|---|
-| `_native` (actuator) | **Rust / PyO3** | Motor control. Depends directly on the Cargo `path` vendor crates of [motorbridge](../motorbridge) — no `ctypes` / C-ABI hop. |
+| `_native` (actuator) | **Rust / PyO3** | Motor control. Depends directly on local `motorbridge` Cargo crates through `.deps/motorbridge` — no `ctypes` / C-ABI hop. |
 | `_math` (kinematics / dynamics / trajectory / controllers) | **C++ / pybind11** | Links **Pinocchio C++** directly (not the Python bindings). No Python `pinocchio` dependency. |
 
 The public API matches `reBotArm_control_py`, so this package is a drop-in replacement.
@@ -60,6 +60,19 @@ mamba activate rebot          # or: conda activate rebot
 bash ./setup_env.sh --install
 ```
 
+Installing into an existing environment (including a large CUDA or RoboStack environment) uses
+the same command:
+
+```bash
+conda activate xense-head
+bash ./setup_env.sh --install
+```
+
+If that environment does not already contain compatible Pinocchio 3.x C++ libraries, the script
+creates an isolated conda-forge prefix at `.deps/pinocchio`. It does not install Pinocchio, Boost,
+or ROS packages into the active environment. The Python wheel is still built and installed with
+the active environment's Python.
+
 ### How the build works
 
 `build.sh` first compiles `librebotarm_math.so` and `_math.so` with CMake (linking Pinocchio C++)
@@ -69,14 +82,17 @@ when they need FK, IK, or gravity compensation. The C++ examples link the same
 `librebotarm_math.so` directly and use `motorbridge`'s C++ binding for hardware examples.
 
 - **Automatic Pinocchio C++ prefix detection**:
-  `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `/usr/local` > `/usr`.
+  `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `.deps/pinocchio` >
+  `/usr/local` > `/usr`.
   Adapts to both `lib` and `lib/x86_64-linux-gnu`, and locates Eigen automatically. **No ROS required.**
+- If no compatible prefix exists, `setup_env.sh --install` runs the equivalent of
+  `setup_env.sh --prepare-pinocchio` and provisions the private `.deps/pinocchio` prefix.
 - The runtime RPATH is baked with the Pinocchio library directory, so no `LD_LIBRARY_PATH` is needed.
 - Example scripts add the local `python/` source tree to `sys.path` automatically when run from
   this repository, so they can be tested before wheel installation.
 
-> ⚠️ Use **Pinocchio 3.x** from conda-forge (`pinocchio>=3.2,<4`). 4.0 reorganized the header
-> layout; the current code targets 3.x.
+> ⚠️ The native backend requires **Pinocchio >=3.2,<4**. The automatic private prefix currently
+> selects conda-forge `libpinocchio=3.9.*`; Pinocchio 4.x is rejected during configuration.
 
 ### Build check
 

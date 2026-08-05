@@ -25,15 +25,15 @@ serde_yaml = "0.9"
 libc = "0.2"
 
 # Direct Rust dependency on the motorbridge native vendor crates (no ctypes / C-ABI hop).
-motor_core             = { path = "../motorbridge/motor_core" }
-motor_vendor_damiao    = { path = "../motorbridge/motor_vendors/damiao" }
-motor_vendor_myactuator = { path = "../motorbridge/motor_vendors/myactuator" }
-motor_vendor_robstride = { path = "../motorbridge/motor_vendors/robstride" }
-motor_vendor_hightorque = { path = "../motorbridge/motor_vendors/hightorque" }
+motor_core             = { path = ".deps/motorbridge/motor_core" }
+motor_vendor_damiao    = { path = ".deps/motorbridge/motor_vendors/damiao" }
+motor_vendor_myactuator = { path = ".deps/motorbridge/motor_vendors/myactuator" }
+motor_vendor_robstride = { path = ".deps/motorbridge/motor_vendors/robstride" }
+motor_vendor_hightorque = { path = ".deps/motorbridge/motor_vendors/hightorque" }
 
 [dev-dependencies]
 # 单元测试用 MockBus（无需真实 CAN 总线）
-motor_core = { path = "../motorbridge/motor_core", features = ["test-support"] }
+motor_core = { path = ".deps/motorbridge/motor_core", features = ["test-support"] }
 
 [profile.release]
 opt-level = 3

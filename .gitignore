@@ -2,6 +2,7 @@
 /example/rust/target/
 /example/cpp/build/
 /dist/
+/.deps/
 /cpp/build/
 
 __pycache__/

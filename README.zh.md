@@ -6,7 +6,7 @@
 
 | 层 | 语言 | 职责 |
 |---|---|---|
-| `_native`（actuator） | **Rust / PyO3** | 电机控制。直接以 Cargo `path` 依赖 [motorbridge](../motorbridge) 的 vendor crates——无 `ctypes` / C-ABI 中转。 |
+| `_native`（actuator） | **Rust / PyO3** | 电机控制。通过 `.deps/motorbridge` 直接以 Cargo `path` 依赖本地 motorbridge vendor crates——无 `ctypes` / C-ABI 中转。 |
 | `_math`（kinematics / dynamics / trajectory / controllers） | **C++ / pybind11** | 直接链接 **Pinocchio C++**（非 Python 绑定），摆脱了 Python `pinocchio` 依赖。 |
 
 接口与 `reBotArm_control_py` 保持一致，可直接替换。
@@ -59,6 +59,17 @@ mamba activate rebot          # 或：conda activate rebot
 bash ./setup_env.sh --install
 ```
 
+安装到已有环境（包括大型 CUDA 环境或已经包含 RoboStack 的环境）仍使用同一条命令：
+
+```bash
+conda activate xense-head
+bash ./setup_env.sh --install
+```
+
+如果当前环境没有兼容的 Pinocchio 3.x C++ 库，脚本会在仓库的 `.deps/pinocchio` 创建
+隔离的 conda-forge 前缀，不会向当前环境安装 Pinocchio、Boost 或任何 ROS 包。Python wheel
+仍由当前环境的 Python 构建并安装。
+
 ### 构建流程
 
 `build.sh` 先用 CMake 编出 `librebotarm_math.so` 和 `_math.so`（链接 Pinocchio C++）落入包目录，
@@ -67,14 +78,17 @@ FK、IK 或重力补偿时，会通过 C ABI 直接动态加载 `librebotarm_mat
 `librebotarm_math.so`，硬件示例通过 `motorbridge` C++ binding 控制电机。
 
 - **Pinocchio C++ 前缀自动探测**：
-  `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `/usr/local` > `/usr`。
+  `-DPINOCCHIO_PREFIX` > `$PINOCCHIO_PREFIX` > `$CONDA_PREFIX` > `.deps/pinocchio` >
+  `/usr/local` > `/usr`。
   自动适配 `lib` 与 `lib/x86_64-linux-gnu`，自动定位 Eigen。**不依赖 ROS。**
+- 如果所有候选前缀都不兼容，`setup_env.sh --install` 会自动执行等价于
+  `setup_env.sh --prepare-pinocchio` 的准备流程。
 - 运行期 RPATH 已写入 Pinocchio 库目录，无需 `LD_LIBRARY_PATH`。
 - 从仓库根目录运行 example 时，脚本会自动把本地 `python/` 源码树加入 `sys.path`，
   因此安装 wheel 之前也可以先测试示例。
 
-> ⚠️ 用 conda-forge 的 **Pinocchio 3.x**（`pinocchio>=3.2,<4`）。4.0 重排了头文件布局，
-> 当前代码按 3.x 编写。
+> ⚠️ 原生后端要求 **Pinocchio >=3.2,<4**。自动私有前缀当前选择 conda-forge
+> `libpinocchio=3.9.*`；配置阶段会拒绝 Pinocchio 4.x。
 
 ### 构建检查
 
