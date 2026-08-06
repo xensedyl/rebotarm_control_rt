@@ -63,7 +63,22 @@ bash ./run_tests.sh                # 期望：xx passed + 若干 skipped（无�
 
 Rust 电机后端通过 `.deps/motorbridge` 链接源码。脚本依次查找现有链接、同级
 `../motorbridge`、`~/rebot_lerobot/motorbridge`，最后在 HOME 下做一次有限深度搜索。
-也可显式设置 `REBOTARM_MOTORBRIDGE_ROOT=/path/to/motorbridge`。
+如果仍未找到，会自动从 `git@github.com:motorbridge/motorbridge.git` clone 固定的
+`v0.5.0` 到 `.deps/motorbridge`；机器没有 GitHub SSH key 时自动回退到 HTTPS。
+也可显式设置：
+
+```bash
+export REBOTARM_MOTORBRIDGE_ROOT=/path/to/motorbridge
+export REBOTARM_MOTORBRIDGE_GIT_URL=git@github.com:your-org/motorbridge.git
+export REBOTARM_MOTORBRIDGE_GIT_REF=v0.5.0
+```
+
+只准备所有原生依赖可运行：`bash setup_env.sh --prepare-deps`。
+
+`pip install motorbridge==0.5.0` 可安装 motorbridge 的 Python API、CLI 和预编译
+`libmotor_abi.so`，但 PyPI wheel/sdist **不包含** `motor_core` 与 `motor_vendors/*` Rust
+crate 源码，不能替代本项目 `_native` 的 Cargo 构建依赖。因此本项目仍使用固定 Git tag
+准备源码；PyPI motorbridge 不是必需依赖。
 
 ---
 

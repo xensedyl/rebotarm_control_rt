@@ -39,6 +39,9 @@ PRIVATE_PINOCCHIO_SPEC="${REBOTARM_PINOCCHIO_SPEC:-libpinocchio=3.9.*}"
 RESOLVED_PINOCCHIO_PREFIX=""
 MOTORBRIDGE_LINK="$SCRIPT_DIR/.deps/motorbridge"
 RESOLVED_MOTORBRIDGE_ROOT=""
+MOTORBRIDGE_GIT_URL="${REBOTARM_MOTORBRIDGE_GIT_URL:-git@github.com:motorbridge/motorbridge.git}"
+MOTORBRIDGE_GIT_HTTPS_URL="${REBOTARM_MOTORBRIDGE_GIT_HTTPS_URL:-https://github.com/motorbridge/motorbridge.git}"
+MOTORBRIDGE_GIT_REF="${REBOTARM_MOTORBRIDGE_GIT_REF:-v0.5.0}"
 
 pinocchio_version_at_prefix() {
     local prefix=$1
@@ -157,6 +160,44 @@ motorbridge_root_is_compatible() {
     done
 }
 
+clone_motorbridge() {
+    local clone_tmp="$SCRIPT_DIR/.deps/motorbridge.clone"
+    local git_ssh_command="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new}"
+    command -v git >/dev/null 2>&1 || {
+        echo "[ERROR] 未找到 git，无法下载 motorbridge。"
+        return 1
+    }
+    if [[ -e "$MOTORBRIDGE_LINK" || -L "$MOTORBRIDGE_LINK" ]]; then
+        echo "[ERROR] $MOTORBRIDGE_LINK 已存在但不是完整的 motorbridge 源码。"
+        echo "        请修复/移走该路径后重试。"
+        return 1
+    fi
+    if [[ -e "$clone_tmp" || -L "$clone_tmp" ]]; then
+        echo "[ERROR] 上次 clone 的临时目录仍存在：$clone_tmp"
+        echo "        请确认没有下载任务后移走该目录，再重试。"
+        return 1
+    fi
+
+    echo "[INFO] 本机未找到 motorbridge，准备下载 $MOTORBRIDGE_GIT_REF。"
+    echo "[INFO] 首选：$MOTORBRIDGE_GIT_URL"
+    if ! GIT_SSH_COMMAND="$git_ssh_command" git clone --depth 1 \
+        --branch "$MOTORBRIDGE_GIT_REF" "$MOTORBRIDGE_GIT_URL" "$clone_tmp"; then
+        if [[ -e "$clone_tmp" || -L "$clone_tmp" ]]; then
+            echo "[ERROR] SSH clone 失败并遗留了临时目录：$clone_tmp"
+            return 1
+        fi
+        echo "[WARN] SSH clone 失败，尝试无需 SSH key 的 HTTPS：$MOTORBRIDGE_GIT_HTTPS_URL"
+        git clone --depth 1 --branch "$MOTORBRIDGE_GIT_REF" \
+            "$MOTORBRIDGE_GIT_HTTPS_URL" "$clone_tmp" || return 1
+    fi
+    if ! motorbridge_root_is_compatible "$clone_tmp"; then
+        echo "[ERROR] 下载的仓库缺少所需 motorbridge crates：$clone_tmp"
+        return 1
+    fi
+    mv "$clone_tmp" "$MOTORBRIDGE_LINK"
+    echo "[INFO] motorbridge 已下载：$(git -C "$MOTORBRIDGE_LINK" rev-parse --short HEAD)"
+}
+
 ensure_motorbridge() {
     local candidate discovered=""
     RESOLVED_MOTORBRIDGE_ROOT=""
@@ -183,6 +224,16 @@ ensure_motorbridge() {
             if [[ -n "$candidate" ]]; then
                 discovered="$(dirname "$(dirname "$candidate")")"
             fi
+        fi
+        if [[ -z "$discovered" ]]; then
+            mkdir -p "$SCRIPT_DIR/.deps"
+            clone_motorbridge || {
+                echo "[ERROR] motorbridge 自动下载失败。"
+                echo "        可设置 REBOTARM_MOTORBRIDGE_ROOT=/path/to/motorbridge，"
+                echo "        或设置 REBOTARM_MOTORBRIDGE_GIT_URL=<其它 Git URL>。"
+                return 1
+            }
+            discovered="$MOTORBRIDGE_LINK"
         fi
     fi
 
@@ -342,12 +393,23 @@ case "$MODE" in
     ensure_pinocchio || exit 1
     echo "[OK] Pinocchio C++ 前缀已就绪：$RESOLVED_PINOCCHIO_PREFIX"
     ;;
+  --prepare-motorbridge)
+    ensure_motorbridge || exit 1
+    echo "[OK] motorbridge 已就绪：$RESOLVED_MOTORBRIDGE_ROOT"
+    ;;
+  --prepare-deps)
+    ensure_pinocchio || exit 1
+    ensure_motorbridge || exit 1
+    echo "[OK] 原生依赖已就绪。"
+    ;;
   *)
     echo "用法："
     echo "  bash $SCRIPT_NAME --mamba [env_name] [py_version]   # 创建 mamba 环境（Miniforge）"
     echo "  bash $SCRIPT_NAME --conda [env_name] [py_version]   # 创建 conda 环境（Miniconda/Anaconda）"
     echo "  bash $SCRIPT_NAME --install                         # 在已激活环境中安装本包"
     echo "  bash $SCRIPT_NAME --prepare-pinocchio               # 仅准备/检查隔离的 Pinocchio C++"
+    echo "  bash $SCRIPT_NAME --prepare-motorbridge              # 查找或自动 clone motorbridge"
+    echo "  bash $SCRIPT_NAME --prepare-deps                     # 准备全部原生依赖"
     echo ""
     echo "示例："
     echo "  bash $SCRIPT_NAME --mamba rebot        # Python 3.12（默认）"

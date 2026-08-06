@@ -73,6 +73,14 @@ creates an isolated conda-forge prefix at `.deps/pinocchio`. It does not install
 or ROS packages into the active environment. The Python wheel is still built and installed with
 the active environment's Python.
 
+If no local `motorbridge` checkout can be found, the installer clones the pinned `v0.5.0` tag from
+`git@github.com:motorbridge/motorbridge.git` into `.deps/motorbridge`, with an automatic HTTPS
+fallback for machines without a GitHub SSH key.
+
+The PyPI `motorbridge` wheel is optional. It contains the Python API, CLI, and `libmotor_abi.so`,
+but not the Rust workspace sources required by this project's direct Cargo dependencies; the
+pinned Git checkout remains the build source.
+
 ### How the build works
 
 `build.sh` first compiles `librebotarm_math.so` and `_math.so` with CMake (linking Pinocchio C++)

@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "motor_core"
-version = "0.4.8"
+version = "0.5.0"
 dependencies = [
  "cc",
  "libloading",
@@ -175,28 +175,28 @@ dependencies = [
 
 [[package]]
 name = "motor_vendor_damiao"
-version = "0.4.8"
+version = "0.5.0"
 dependencies = [
  "motor_core",
 ]
 
 [[package]]
 name = "motor_vendor_hightorque"
-version = "0.4.8"
+version = "0.5.0"
 dependencies = [
  "motor_core",
 ]
 
 [[package]]
 name = "motor_vendor_myactuator"
-version = "0.4.8"
+version = "0.5.0"
 dependencies = [
  "motor_core",
 ]
 
 [[package]]
 name = "motor_vendor_robstride"
-version = "0.4.8"
+version = "0.5.0"
 dependencies = [
  "motor_core",
 ]

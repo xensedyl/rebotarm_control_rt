@@ -70,6 +70,14 @@ bash ./setup_env.sh --install
 隔离的 conda-forge 前缀，不会向当前环境安装 Pinocchio、Boost 或任何 ROS 包。Python wheel
 仍由当前环境的 Python 构建并安装。
 
+如果本机找不到 motorbridge 源码，安装脚本会把
+`git@github.com:motorbridge/motorbridge.git` 的固定 `v0.5.0` tag clone 到
+`.deps/motorbridge`；没有 GitHub SSH key 的机器会自动回退到 HTTPS。
+
+PyPI 的 `motorbridge` wheel 是可选运行时包：它包含 Python API、CLI 和
+`libmotor_abi.so`，但不包含本项目 Cargo 直连所需的 Rust workspace 源码，因此不能替代
+固定 Git tag 的源码准备流程。
+
 ### 构建流程
 
 `build.sh` 先用 CMake 编出 `librebotarm_math.so` 和 `_math.so`（链接 Pinocchio C++）落入包目录，
