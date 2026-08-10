@@ -7,6 +7,7 @@ C++ bindings.
 """
 from __future__ import annotations
 
+import atexit
 import sys
 import tempfile
 import time
@@ -44,7 +45,7 @@ from rebotarm_control_rt.paths import resolve_urdf_path
 
 
 def _mesh_resolved_urdf(urdf_path: str | Path | None = None) -> str:
-    src = resolve_urdf_path(urdf_path)
+    src = resolve_urdf_path(urdf_path).resolve()
     text = src.read_text(encoding="utf-8")
     text = text.replace(
         "package://reBot-DevArm_description_fixend/",
@@ -57,19 +58,62 @@ def _mesh_resolved_urdf(urdf_path: str | Path | None = None) -> str:
     tmp = tempfile.NamedTemporaryFile("w", suffix=".urdf", delete=False, encoding="utf-8")
     with tmp:
         tmp.write(text)
+    atexit.register(Path(tmp.name).unlink, missing_ok=True)
     return tmp.name
+
+
+def _mesh_package_dirs(urdf_path: str | Path) -> list[str]:
+    """Return mesh search roots for both common installed-package layouts."""
+    src = Path(urdf_path).expanduser().resolve()
+    candidates = (src.parent, src.parent.parent)
+    return [str(path) for path in dict.fromkeys(candidates) if path.is_dir()]
+
+
+def _build_visual_geometry(model, mesh_urdf: str, source_urdf: str | Path):
+    return pin.buildGeomFromUrdf(
+        model,
+        mesh_urdf,
+        pin.GeometryType.VISUAL,
+        package_dirs=_mesh_package_dirs(source_urdf),
+    )
+
+
+def _joint_configuration_slices(
+    model, joint_names: list[str], nq: int
+) -> list[tuple[slice, slice]]:
+    """Map a reduced RT configuration into the corresponding visual joints."""
+    slices = []
+    rt_start = 0
+    for name in joint_names:
+        if not model.existJointName(name):
+            raise ValueError(f"visual URDF does not contain RT joint {name!r}")
+        joint_id = model.getJointId(name)
+        joint_nq = int(model.nqs[joint_id])
+        rt_stop = rt_start + joint_nq
+        if rt_stop > nq:
+            raise ValueError("visual and RT joint dimensions do not match")
+        visual_start = int(model.idx_qs[joint_id])
+        slices.append(
+            (slice(rt_start, rt_stop), slice(visual_start, visual_start + joint_nq))
+        )
+        rt_start = rt_stop
+    if rt_start != nq:
+        raise ValueError("visual and RT joint dimensions do not match")
+    return slices
 
 
 class Visualizer:
     def __init__(self, open_browser: bool = True, urdf_path: str | Path | None = None) -> None:
-        source_urdf = str(resolve_urdf_path(urdf_path))
+        source_urdf = resolve_urdf_path(urdf_path).resolve()
         mesh_urdf = _mesh_resolved_urdf(source_urdf)
 
-        self._rt_model = load_robot_model(source_urdf)
+        self._rt_model = load_robot_model(str(source_urdf))
         self._model = pin.buildModelFromUrdf(mesh_urdf)
         self._data = self._model.createData()
-        self._visual_model = pin.buildGeomFromUrdf(
-            self._model, mesh_urdf, pin.GeometryType.VISUAL
+        self._visual_model = _build_visual_geometry(self._model, mesh_urdf, source_urdf)
+        self._visual_neutral = np.asarray(pin.neutral(self._model), dtype=float)
+        self._joint_q_slices = _joint_configuration_slices(
+            self._model, self._rt_model.joint_names(), self._rt_model.nq
         )
         self._visual_data = self._visual_model.createData()
         self._meshcat_viz = meshcat.Visualizer(zmq_url=None)
@@ -102,7 +146,10 @@ class Visualizer:
         q = np.asarray(q, dtype=float)
         if q.shape != (self.nq,):
             raise ValueError(f"q must have shape ({self.nq},), got {q.shape}")
-        self._viz.display(q)
+        visual_q = self._visual_neutral.copy()
+        for rt_slice, visual_slice in self._joint_q_slices:
+            visual_q[visual_slice] = q[rt_slice]
+        self._viz.display(visual_q)
 
     def neutral(self) -> None:
         self.update(self._rt_model.neutral())
